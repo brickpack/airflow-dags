@@ -49,7 +49,7 @@ def preview_data(**kwargs):
 
 default_args = {
     'owner': 'airflow',
-    'start_date': datetime(2024, 7, 1),
+    'start_date': datetime(2024, 8, 17),
     'catchup': False
 }
 
