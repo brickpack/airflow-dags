@@ -115,7 +115,7 @@ default_args = {
 }
 
 dag = DAG(
-    'import_job_search_response',
+    'import_job_search',
     default_args=default_args,
     description='A DAG to import job_search_response.json into PostgreSQL',
     schedule_interval=timedelta(days=1),
