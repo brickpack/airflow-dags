@@ -54,7 +54,7 @@ def call_job_search_api():
         file_path = os.path.join(pvc_path, "job_search_response.json")
 
         # Write the response to a file
-        with open("job_search_response.json", "w") as file:
+        with open(file_path, "w") as file:
             json.dump(response.json(), file, indent=4)
 
         print(f"Response has been written to {file_path}")
@@ -141,11 +141,25 @@ call_job_search_api_task = KubernetesPodOperator(
     image='apache/airflow:2.9.2',
     cmds=["python", "-c"],
     arguments=["from import_job_search import call_job_search_api; call_job_search_api()"],
-    volumes=[],
-    volume_mounts=[],
+    volumes=[
+        {
+            'name': 'airflow-logs',
+            'persistentVolumeClaim': {'claimName': 'airflow-logs'}
+        }
+    ],
+    volume_mounts=[
+        {
+            'name': 'airflow-logs',
+            'mountPath': '/airflow-logs'
+        }
+    ],
+    security_context={
+        'fsGroup': 65534,  # This is typically the 'nobody' group
+        'runAsUser': 50000  # Choose a non-root user ID
+    },
     is_delete_operator_pod=True,
     in_cluster=True,
-    get_logs=True,
+    # get_logs=True,
     dag=dag,
 )
 
