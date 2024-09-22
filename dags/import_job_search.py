@@ -2,11 +2,13 @@ from airflow import DAG
 from airflow.hooks.base import BaseHook
 from airflow.operators.python_operator import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.providers.cncf.kubernetes.operators.kubernetes_pod import KubernetesPodOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime, timedelta
 import requests
 import logging
 import json
+import os
 
 
 # Set up logging
@@ -28,7 +30,7 @@ def get_rapidapi_key():
         raise
 
 # def fetch_job_data(**kwargs):
-def fetch_job_data():
+def call_job_search_api():
     try:
         url = api_url
         headers = {
@@ -47,11 +49,15 @@ def fetch_job_data():
         response = requests.get(url, headers=headers, params=querystring)
         response.raise_for_status()  # Raises a HTTPError if the HTTP request returned an unsuccessful status code
 
+        # Use the PVC path
+        pvc_path = "/airflow-logs"
+        file_path = os.path.join(pvc_path, "job_search_response.json")
+
         # Write the response to a file
         with open("job_search_response.json", "w") as file:
             json.dump(response.json(), file, indent=4)
 
-        print("Response has been written to job_search_response.json")
+        print(f"Response has been written to {file_path}")
 
         data = response.json()
         return data
@@ -121,10 +127,26 @@ dag = DAG(
     schedule_interval=timedelta(days=1),
 )
 
-fetch_jobs_task = PythonOperator(
-    task_id='fetch_jobs_data',
-    python_callable=fetch_job_data,
-    provide_context=True,
+# call_job_search_api_task = PythonOperator(
+#     task_id='call_job_search_api_task',
+#     python_callable=call_job_search_api,
+#     provide_context=True,
+#     dag=dag,
+# )
+
+call_job_search_api_task = KubernetesPodOperator(
+    task_id='call_job_search_api_task',
+    name='call_job_search_api',
+    namespace='airflow',
+    image='apache/airflow:2.9.2',
+    cmds=["python", "-c"],
+    arguments=["from import_job_search import call_job_search_api; call_job_search_api()"],
+    volumes=[],
+    volume_mounts=[],
+    is_delete_operator_pod=True,
+    in_cluster=True,
+    task_id='call_job_search_api_task',
+    get_logs=True,
     dag=dag,
 )
 
@@ -150,4 +172,4 @@ import_data_task = PythonOperator(
     dag=dag,
 )
 
-fetch_jobs_task >> create_table_task >> import_data_task
+call_job_search_api_task >> create_table_task >> import_data_task
