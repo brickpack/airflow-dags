@@ -145,7 +145,6 @@ call_job_search_api_task = KubernetesPodOperator(
     volume_mounts=[],
     is_delete_operator_pod=True,
     in_cluster=True,
-    task_id='call_job_search_api_task',
     get_logs=True,
     dag=dag,
 )
