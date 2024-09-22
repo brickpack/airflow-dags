@@ -9,8 +9,6 @@ from cosmos.profiles import SnowflakeUserPasswordProfileMapping
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-args = {"owner": "Airflow", "start_date": datetime(2021,3,22,17,15)}
-
 
 profile_config = ProfileConfig(
     profile_name="default",
