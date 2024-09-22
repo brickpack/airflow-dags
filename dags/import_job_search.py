@@ -4,6 +4,7 @@ from airflow.operators.python_operator import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.cncf.kubernetes.operators.kubernetes_pod import KubernetesPodOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from kubernetes.client import models as k8s
 from datetime import datetime, timedelta
 import requests
 import logging
@@ -142,24 +143,23 @@ call_job_search_api_task = KubernetesPodOperator(
     cmds=["python", "-c"],
     arguments=["from import_job_search import call_job_search_api; call_job_search_api()"],
     volumes=[
-        {
-            'name': 'airflow-logs',
-            'persistentVolumeClaim': {'claimName': 'airflow-logs'}
-        }
+        k8s.V1Volume(
+            name='airflow-logs',
+            persistent_volume_claim=k8s.V1PersistentVolumeClaimVolumeSource(claim_name='airflow-logs')
+        )
     ],
     volume_mounts=[
-        {
-            'name': 'airflow-logs',
-            'mountPath': '/airflow-logs'
-        }
+        k8s.V1VolumeMount(
+            name='airflow-logs',
+            mount_path='/airflow-logs'
+        )
     ],
-    security_context={
-        'fsGroup': 65534,  # This is typically the 'nobody' group
-        'runAsUser': 50000  # Choose a non-root user ID
-    },
+    security_context=k8s.V1PodSecurityContext(
+        fs_group=65534,
+        run_as_user=50000
+    ),
     is_delete_operator_pod=True,
     in_cluster=True,
-    # get_logs=True,
     dag=dag,
 )
 
