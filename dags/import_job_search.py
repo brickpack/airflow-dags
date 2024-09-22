@@ -70,7 +70,7 @@ def call_job_search_api():
 
 def load_json_to_postgres():
     # Read the JSON file
-    with open('job_search_response.json', 'r') as file:
+    with open('/airflow-logs/job_search_response.json', 'r') as file:
         data = json.load(file)
     
     # Connect to PostgreSQL
