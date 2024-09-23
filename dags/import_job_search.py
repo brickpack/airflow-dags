@@ -20,6 +20,7 @@ airflow_api_conn_id = 'rapidapi_jsearch'
 api_url = "https://jsearch.p.rapidapi.com/search"
 rapidapi_host = "jsearch.p.rapidapi.com"
 postgres_airflow_conn = 'pg_etl'
+bucket = 'birkbeck-job-search'
 
 
 def get_rapidapi_key():
@@ -64,7 +65,7 @@ def call_job_search_api():
             json.dump(response.json(), file, indent=4)
 
         # Upload the JSON file to S3
-        bucket_name = "birkbeck-job-search"
+        bucket_name = bucket
         s3_file_key = "job_search/job_search_response.json"
         upload_to_s3(local_file_path, bucket_name, s3_file_key)
 
@@ -86,7 +87,7 @@ def download_from_s3(bucket, object_name, file_name):
 def load_json_to_postgres():
     # Download the JSON file from S3
     local_file_path = "/tmp/job_search_response.json"
-    bucket_name = "your-s3-bucket"
+    bucket_name = bucket
     s3_file_key = "job_search/job_search_response.json"
     download_from_s3(bucket_name, s3_file_key, local_file_path)
 
