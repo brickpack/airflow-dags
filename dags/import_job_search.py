@@ -1,3 +1,4 @@
+import boto3
 from airflow import DAG
 from airflow.hooks.base import BaseHook
 from airflow.operators.python_operator import PythonOperator
@@ -9,8 +10,7 @@ from datetime import datetime, timedelta
 import requests
 import logging
 import json
-import os
-
+# import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +30,16 @@ def get_rapidapi_key():
         logger.error("Failed to get RapidAPI key: %s", e)
         raise
 
-# def fetch_job_data(**kwargs):
+def upload_to_s3(file_name, bucket, object_name=None):
+    """Upload a file to an S3 bucket."""
+    s3 = boto3.client('s3')
+    try:
+        s3.upload_file(file_name, bucket, object_name or file_name)
+        print(f"File {file_name} uploaded to bucket {bucket}")
+    except Exception as e:
+        print(f"Failed to upload {file_name} to S3: {e}")
+        raise
+
 def call_job_search_api():
     try:
         url = api_url
@@ -40,7 +49,6 @@ def call_job_search_api():
         }
         querystring = {
             "query": "database engineer in united states",
-            # "query": "database engineer in united states via linkedin",
             "page": "1",
             "num_pages": "10",
             "date_posted": "today",
@@ -48,38 +56,48 @@ def call_job_search_api():
             "employment_types": "FULLTIME",
         }
         response = requests.get(url, headers=headers, params=querystring)
-        response.raise_for_status()  # Raises a HTTPError if the HTTP request returned an unsuccessful status code
+        response.raise_for_status()
 
-        # Use the PVC path
-        pvc_path = "/airflow-logs"
-        file_path = os.path.join(pvc_path, "job_search_response.json")
-
-        # Write the response to a file
-        with open(file_path, "w") as file:
+        # Save the response to a local file
+        local_file_path = "/tmp/job_search_response.json"
+        with open(local_file_path, "w") as file:
             json.dump(response.json(), file, indent=4)
 
-        print(f"Response has been written to {file_path}")
+        # Upload the JSON file to S3
+        bucket_name = "birkbeck-job-search"
+        s3_file_key = "job_search/job_search_response.json"
+        upload_to_s3(local_file_path, bucket_name, s3_file_key)
 
-        data = response.json()
-        return data
-    
-        # # Save data to XCom for downstream tasks
-        # return data['results']
+        print(f"Response has been uploaded to s3://{bucket_name}/{s3_file_key}")
     except requests.exceptions.RequestException as e:
         logger.error("HTTP Request failed: %s", e)
         raise
 
+def download_from_s3(bucket, object_name, file_name):
+    """Download a file from an S3 bucket."""
+    s3 = boto3.client('s3')
+    try:
+        s3.download_file(bucket, object_name, file_name)
+        print(f"File {file_name} downloaded from bucket {bucket}")
+    except Exception as e:
+        print(f"Failed to download {object_name} from S3: {e}")
+        raise
+
 def load_json_to_postgres():
-    # Read the JSON file
-    with open('/airflow-logs/job_search_response.json', 'r') as file:
+    # Download the JSON file from S3
+    local_file_path = "/tmp/job_search_response.json"
+    bucket_name = "your-s3-bucket"
+    s3_file_key = "job_search/job_search_response.json"
+    download_from_s3(bucket_name, s3_file_key, local_file_path)
+
+    # Read the JSON file and insert it into PostgreSQL
+    with open(local_file_path, 'r') as file:
         data = json.load(file)
-    
-    # Connect to PostgreSQL
+
     pg_hook = PostgresHook(postgres_conn_id=postgres_airflow_conn)
     conn = pg_hook.get_conn()
     cursor = conn.cursor()
 
-    # Create table if not exists
     create_table_sql = """
     CREATE TABLE IF NOT EXISTS job_search_responses (
         id SERIAL PRIMARY KEY,
@@ -92,7 +110,6 @@ def load_json_to_postgres():
     """
     cursor.execute(create_table_sql)
 
-    # Insert data
     for job in data['jobs']:
         insert_sql = """
         INSERT INTO job_search_responses (job_title, company, location, description, date_posted)
@@ -110,11 +127,10 @@ def load_json_to_postgres():
     cursor.close()
     conn.close()
 
-
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'start_date': datetime(2024, 9, 22),
+    'start_date': datetime(2024, 9, 23),
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 1,
@@ -124,65 +140,20 @@ default_args = {
 dag = DAG(
     'import_job_search',
     default_args=default_args,
-    description='A DAG to import job_search_response.json into PostgreSQL',
+    description='A DAG to import job_search_response.json from S3 into PostgreSQL',
     schedule_interval=timedelta(days=1),
 )
 
-# call_job_search_api_task = PythonOperator(
-#     task_id='call_job_search_api_task',
-#     python_callable=call_job_search_api,
-#     provide_context=True,
-#     dag=dag,
-# )
-
-call_job_search_api_task = KubernetesPodOperator(
+call_job_search_api_task = PythonOperator(
     task_id='call_job_search_api_task',
-    name='call_job_search_api',
-    namespace='airflow',
-    image='apache/airflow:2.9.2',
-    cmds=["python", "-c"],
-    arguments=["from import_job_search import call_job_search_api; call_job_search_api()"],
-    volumes=[
-        k8s.V1Volume(
-            name='airflow-logs',
-            persistent_volume_claim=k8s.V1PersistentVolumeClaimVolumeSource(claim_name='airflow-logs')
-        )
-    ],
-    volume_mounts=[
-        k8s.V1VolumeMount(
-            name='airflow-logs',
-            mount_path='/airflow-logs'
-        )
-    ],
-    security_context=k8s.V1PodSecurityContext(
-        fs_group=65534,
-        run_as_user=50000
-    ),
-    is_delete_operator_pod=True,
-    in_cluster=True,
+    python_callable=call_job_search_api,
     dag=dag,
 )
 
-create_table_task = PostgresOperator(
-    task_id='create_table',
-    postgres_conn_id=postgres_airflow_conn,
-    sql="""
-    CREATE TABLE IF NOT EXISTS job_search_responses (
-        id SERIAL PRIMARY KEY,
-        job_title VARCHAR(255),
-        company VARCHAR(255),
-        location VARCHAR(255),
-        description TEXT,
-        date_posted DATE
-    );
-    """,
-    dag=dag,
-)
-
-import_data_task = PythonOperator(
-    task_id='import_data',
+load_json_to_postgres_task = PythonOperator(
+    task_id='load_json_to_postgres',
     python_callable=load_json_to_postgres,
     dag=dag,
 )
 
-call_job_search_api_task >> create_table_task >> import_data_task
+call_job_search_api_task >> load_json_to_postgres_task
