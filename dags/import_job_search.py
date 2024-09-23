@@ -1,16 +1,13 @@
-import boto3
 from airflow import DAG
 from airflow.hooks.base import BaseHook
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.operators.python_operator import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
-from airflow.providers.cncf.kubernetes.operators.kubernetes_pod import KubernetesPodOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from kubernetes.client import models as k8s
 from datetime import datetime, timedelta
 import requests
 import logging
 import json
-# import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -24,6 +21,7 @@ bucket = 'birkbeck-job-search'
 
 
 def get_rapidapi_key():
+    """Fetch the RapidAPI key from the Airflow connection."""
     try:
         connection = BaseHook.get_connection(airflow_api_conn_id)
         return connection.extra_dejson.get('headers').get('x-rapidapi-key')
@@ -32,16 +30,17 @@ def get_rapidapi_key():
         raise
 
 def upload_to_s3(file_name, bucket, object_name=None):
-    """Upload a file to an S3 bucket."""
-    s3 = boto3.client('s3')
+    """Upload a file to an S3 bucket using Airflow's S3Hook."""
+    s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
     try:
-        s3.upload_file(file_name, bucket, object_name or file_name)
-        print(f"File {file_name} uploaded to bucket {bucket}")
+        s3_hook.load_file(filename=file_name, key=object_name or file_name, bucket_name=bucket, replace=True)
+        print(f"File {file_name} uploaded to s3://{bucket}/{object_name or file_name}")
     except Exception as e:
         print(f"Failed to upload {file_name} to S3: {e}")
         raise
 
 def call_job_search_api():
+    """Fetch job search results from the RapidAPI, store it locally and upload to S3."""
     try:
         url = api_url
         headers = {
@@ -65,31 +64,30 @@ def call_job_search_api():
             json.dump(response.json(), file, indent=4)
 
         # Upload the JSON file to S3
-        bucket_name = bucket
         s3_file_key = "job_search/job_search_response.json"
-        upload_to_s3(local_file_path, bucket_name, s3_file_key)
+        upload_to_s3(local_file_path, bucket, s3_file_key)
 
-        print(f"Response has been uploaded to s3://{bucket_name}/{s3_file_key}")
+        print(f"Response has been uploaded to s3://{bucket}/{s3_file_key}")
     except requests.exceptions.RequestException as e:
         logger.error("HTTP Request failed: %s", e)
         raise
 
 def download_from_s3(bucket, object_name, file_name):
-    """Download a file from an S3 bucket."""
-    s3 = boto3.client('s3')
+    """Download a file from an S3 bucket using Airflow's S3Hook."""
+    s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
     try:
-        s3.download_file(bucket, object_name, file_name)
-        print(f"File {file_name} downloaded from bucket {bucket}")
+        s3_hook.download_file(key=object_name, bucket_name=bucket, local_path=file_name)
+        print(f"File {file_name} downloaded from s3://{bucket}/{object_name}")
     except Exception as e:
         print(f"Failed to download {object_name} from S3: {e}")
         raise
 
 def load_json_to_postgres():
+    """Load the JSON data from S3 and insert it into PostgreSQL."""
     # Download the JSON file from S3
     local_file_path = "/tmp/job_search_response.json"
-    bucket_name = bucket
     s3_file_key = "job_search/job_search_response.json"
-    download_from_s3(bucket_name, s3_file_key, local_file_path)
+    download_from_s3(bucket, s3_file_key, local_file_path)
 
     # Read the JSON file and insert it into PostgreSQL
     with open(local_file_path, 'r') as file:
