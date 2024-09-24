@@ -360,7 +360,7 @@ def load_data(**context):
             job_naics_name VARCHAR(255)
         );
         
-        CREATE TABLE IF NOT EXSISTS apply_options (
+        CREATE TABLE IF NOT EXISTS apply_options (
             job_id VARCHAR(255),
             publisher VARCHAR(100),
             apply_link TEXT,
