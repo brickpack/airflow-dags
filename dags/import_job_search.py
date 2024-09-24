@@ -132,7 +132,14 @@ def transform_data(**context):
         raise ValueError("No data received from extract_data task")
     logging.info("raw_data successfully retrieved from XCom")
 
-    transformed_data = {}
+     # If raw_data contains multiple jobs
+    for job in raw_data.get('data', []):
+        transformed_data = {}
+        # Process each job individually
+        transformed_data['job_id'] = job.get('job_id', '').strip()
+        if not transformed_data['job_id']:
+            logging.error("Job ID is missing or empty.")
+            continue  # Skip this job or handle accordingly
     
     # Helper functions
     def parse_boolean(value):
@@ -292,9 +299,11 @@ def transform_data(**context):
     context['ti'].xcom_push(key='transformed_data', value=transformed_data)
     context['ti'].xcom_push(key='transformed_apply_options', value=transformed_apply_options)
 
+
 def load_data(**context):
-    # import psycopg2
-    # from psycopg2.extras import execute_values
+    import logging
+
+    logging.info("Starting load_data task")
 
     transformed_data = context['ti'].xcom_pull(key='transformed_data', task_ids='transform_data')
     transformed_apply_options = context['ti'].xcom_pull(key='transformed_apply_options', task_ids='transform_data')
@@ -304,10 +313,10 @@ def load_data(**context):
         conn = pg_hook.get_conn()
         cursor = conn.cursor()
 
-        create_table_sql = """
+        create_job_search_table_sql = """
         CREATE TABLE IF NOT EXISTS job_search (
-            id SERIAL PRIMARY KEY,
-            job_id VARCHAR(255),
+            id SERIAL,
+            job_id VARCHAR(255) PRIMARY KEY,
             employer_name VARCHAR(255),
             employer_logo TEXT,
             employer_website VARCHAR(255),
@@ -357,38 +366,48 @@ def load_data(**context):
             job_onet_job_zone VARCHAR(20),
             job_occupational_categories TEXT,
             job_naics_code VARCHAR(20),
-            job_naics_name VARCHAR(255)
+            job_naics_name VARCHAR(255),
         );
-        
+        """
+        cursor.execute(create_job_search_table_sql)
+
+        create_apply_options_table_sql = """
         CREATE TABLE IF NOT EXISTS apply_options (
-            id INT,
             job_id VARCHAR(255),
             publisher VARCHAR(100),
             apply_link TEXT,
             is_direct BOOLEAN,
-            FOREIGN KEY (id) REFERENCES job_search(id)
+            FOREIGN KEY (job_id) REFERENCES job_search(job_id),
+            PRIMARY KEY (job_id, publisher)
         );
         """
-        cursor.execute(create_table_sql)
+        cursor.execute(create_apply_options_table_sql)
 
         # Insert into 'job_search' table
         job_columns = ', '.join(transformed_data.keys())
         job_placeholders = ', '.join(['%s'] * len(transformed_data))
-        job_insert_query = f"INSERT INTO job_search ({job_columns}) VALUES ({job_placeholders}) ON CONFLICT (job_id) DO NOTHING"
-
+        job_insert_query = f"""
+            INSERT INTO job_search ({job_columns})
+            VALUES ({job_placeholders})
+            ON CONFLICT (job_id) DO NOTHING
+        """
         cursor.execute(job_insert_query, list(transformed_data.values()))
 
         # Insert into 'apply_options' table
         if transformed_apply_options:
             apply_columns = list(transformed_apply_options[0].keys())
             apply_columns_str = ', '.join(apply_columns)
-            apply_placeholders = ', '.join(['%s'] * len(apply_columns))  # Adjust placeholder as needed
+            apply_placeholders = ', '.join(['%s'] * len(apply_columns))
+
+            conflict_columns = ['job_id', 'publisher']
+            conflict_columns_str = ', '.join(conflict_columns)
+            update_columns = [col for col in apply_columns if col not in conflict_columns]
 
             apply_insert_query = f"""
                 INSERT INTO apply_options ({apply_columns_str})
                 VALUES ({apply_placeholders})
-                ON DUPLICATE KEY UPDATE
-                {', '.join([f"{col}=VALUES({col})" for col in apply_columns if col != 'job_id'])}
+                ON CONFLICT ({conflict_columns_str}) DO UPDATE SET
+                {', '.join([f"{col}=EXCLUDED.{col}" for col in update_columns])}
             """
 
             apply_values = [tuple(option[col] for col in apply_columns) for option in transformed_apply_options]
@@ -396,12 +415,15 @@ def load_data(**context):
             cursor.executemany(apply_insert_query, apply_values)
 
         conn.commit()
+        logging.info("Data loaded successfully into the database")
     except Exception as e:
         conn.rollback()
+        logging.error(f"Error in load_data: {e}")
         raise e
     finally:
         cursor.close()
         conn.close()
+
 
 default_args = {
     'owner': 'airflow',
