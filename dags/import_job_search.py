@@ -120,8 +120,10 @@ def extract_data(**context):
         print(f"Error in extract_data: {e}")
         raise e
 
+
 def transform_data(**context):
-    import re
+    import json
+    import logging
     from datetime import datetime
     from urllib.parse import urlparse
 
@@ -132,21 +134,12 @@ def transform_data(**context):
         raise ValueError("No data received from extract_data task")
     logging.info("raw_data successfully retrieved from XCom")
 
-     # If raw_data contains multiple jobs
-    for job in raw_data.get('data', []):
-        transformed_data = {}
-        # Process each job individually
-        transformed_data['job_id'] = job.get('job_id', '').strip()
-        if not transformed_data['job_id']:
-            logging.error("Job ID is missing or empty.")
-            continue  # Skip this job or handle accordingly
-    
     # Helper functions
     def parse_boolean(value):
         if isinstance(value, str):
             return value.lower() == 'true'
         return bool(value)
-        
+
     def parse_float(value):
         try:
             if value is None or value == '':
@@ -154,13 +147,13 @@ def transform_data(**context):
             return float(value)
         except (TypeError, ValueError):
             return None
-    
+
     def parse_int(value):
         try:
             return int(value)
         except (TypeError, ValueError):
             return None
-    
+
     def validate_url(url):
         try:
             result = urlparse(url)
@@ -168,136 +161,166 @@ def transform_data(**context):
         except:
             return False
 
-    # 1. Data Type Conversion and Normalization
-    transformed_data['job_id'] = raw_data.get('job_id', '').strip()
-    transformed_data['employer_name'] = raw_data.get('employer_name', '').strip()
-    transformed_data['employer_logo'] = raw_data.get('employer_logo')
-    transformed_data['employer_website'] = raw_data.get('employer_website')
-    transformed_data['employer_company_type'] = raw_data.get('employer_company_type', '').strip()
-    transformed_data['employer_linkedin'] = raw_data.get('employer_linkedin')
+    # List to store all transformed jobs
+    transformed_jobs = []
+    transformed_apply_options_list = []
 
-    # Validate URLs
-    url_fields = ['employer_logo', 'employer_website', 'employer_linkedin']
-    for field in url_fields:
-        url = transformed_data.get(field)
-        if url and not validate_url(url):
-            transformed_data[field] = None  # Invalid URL, set to None
+    # Process each job in the data
+    for job in raw_data.get('data', []):
+        transformed_data = {}
 
-    # Continue processing other fields...
-    transformed_data['job_publisher'] = raw_data.get('job_publisher', '').strip()
-    transformed_data['job_employment_type'] = raw_data.get('job_employment_type', '').strip().upper()
-    transformed_data['job_title'] = raw_data.get('job_title', '').strip()
-    transformed_data['job_apply_link'] = raw_data.get('job_apply_link')
-    transformed_data['job_apply_is_direct'] = parse_boolean(raw_data.get('job_apply_is_direct'))
-    transformed_data['job_apply_quality_score'] = parse_float(raw_data.get('job_apply_quality_score'))
-    transformed_data['job_description'] = raw_data.get('job_description', '').strip()
-    transformed_data['job_is_remote'] = parse_boolean(raw_data.get('job_is_remote'))
+        # Process each job individually
+        transformed_data['job_id'] = job.get('job_id', '').strip()
+        if not transformed_data['job_id']:
+            logging.error("Job ID is missing or empty.")
+            continue  # Skip this job or handle accordingly
 
-    # Convert timestamps
-    transformed_data['job_posted_at_timestamp'] = parse_int(raw_data.get('job_posted_at_timestamp'))
-    job_posted_at_datetime_str = raw_data.get('job_posted_at_datetime_utc')
-    if job_posted_at_datetime_str:
-        transformed_data['job_posted_at_datetime_utc'] = datetime.strptime(job_posted_at_datetime_str, '%Y-%m-%dT%H:%M:%S.%fZ')
-    else:
-        transformed_data['job_posted_at_datetime_utc'] = None
+        # 1. Data Type Conversion and Normalization
+        transformed_data['employer_name'] = job.get('employer_name', '').strip()
+        transformed_data['employer_logo'] = job.get('employer_logo')
+        transformed_data['employer_website'] = job.get('employer_website')
+        transformed_data['employer_company_type'] = job.get('employer_company_type', '').strip()
+        transformed_data['employer_linkedin'] = job.get('employer_linkedin')
 
-    # Location data
-    transformed_data['job_city'] = raw_data.get('job_city', '').strip()
-    transformed_data['job_state'] = raw_data.get('job_state', '').strip()
-    transformed_data['job_country'] = raw_data.get('job_country', '').strip().upper()
-    transformed_data['job_latitude'] = parse_float(raw_data.get('job_latitude'))
-    transformed_data['job_longitude'] = parse_float(raw_data.get('job_longitude'))
+        # Validate URLs
+        url_fields = ['employer_logo', 'employer_website', 'employer_linkedin']
+        for field in url_fields:
+            url = transformed_data.get(field)
+            if url and not validate_url(url):
+                transformed_data[field] = None  # Invalid URL, set to None
 
-    # Validate geographical data
-    lat = transformed_data['job_latitude']
-    lon = transformed_data['job_longitude']
+        # Continue processing other fields...
+        transformed_data['job_publisher'] = job.get('job_publisher', '').strip()
+        transformed_data['job_employment_type'] = job.get('job_employment_type', '').strip().upper()
+        transformed_data['job_title'] = job.get('job_title', '').strip()
+        transformed_data['job_apply_link'] = job.get('job_apply_link')
+        transformed_data['job_apply_is_direct'] = parse_boolean(job.get('job_apply_is_direct'))
+        transformed_data['job_apply_quality_score'] = parse_float(job.get('job_apply_quality_score'))
+        transformed_data['job_description'] = job.get('job_description', '').strip()
+        transformed_data['job_is_remote'] = parse_boolean(job.get('job_is_remote'))
 
-    if lat is None or not (-90 <= lat <= 90):
-        transformed_data['job_latitude'] = None
-    if lon is None or not (-180 <= lon <= 180):
-        transformed_data['job_longitude'] = None
+        # Convert timestamps
+        transformed_data['job_posted_at_timestamp'] = parse_int(job.get('job_posted_at_timestamp'))
+        job_posted_at_datetime_str = job.get('job_posted_at_datetime_utc')
+        if job_posted_at_datetime_str:
+            transformed_data['job_posted_at_datetime_utc'] = datetime.strptime(
+                job_posted_at_datetime_str, '%Y-%m-%dT%H:%M:%S.%fZ')
+        else:
+            transformed_data['job_posted_at_datetime_utc'] = None
 
-    # Handle optional fields
-    transformed_data['job_benefits'] = raw_data.get('job_benefits')
-    transformed_data['job_google_link'] = raw_data.get('job_google_link')
+        # Location data
+        transformed_data['job_city'] = job.get('job_city', '').strip()
+        transformed_data['job_state'] = job.get('job_state', '').strip()
+        transformed_data['job_country'] = job.get('job_country', '').strip().upper()
+        transformed_data['job_latitude'] = parse_float(job.get('job_latitude'))
+        transformed_data['job_longitude'] = parse_float(job.get('job_longitude'))
 
-    # Offer expiration
-    job_offer_expiration_datetime_str = raw_data.get('job_offer_expiration_datetime_utc')
-    if job_offer_expiration_datetime_str:
-        transformed_data['job_offer_expiration_datetime_utc'] = datetime.strptime(job_offer_expiration_datetime_str, '%Y-%m-%dT%H:%M:%S.%fZ')
-    else:
-        transformed_data['job_offer_expiration_datetime_utc'] = None
-    transformed_data['job_offer_expiration_timestamp'] = parse_int(raw_data.get('job_offer_expiration_timestamp'))
+        # Validate geographical data
+        lat = transformed_data['job_latitude']
+        lon = transformed_data['job_longitude']
 
-    # Flatten 'job_required_experience'
-    job_required_experience = raw_data.get('job_required_experience', {})
-    transformed_data['job_required_experience_no_experience_required'] = parse_boolean(job_required_experience.get('no_experience_required'))
-    transformed_data['job_required_experience_required_in_months'] = parse_int(job_required_experience.get('required_experience_in_months'))
-    transformed_data['job_required_experience_experience_mentioned'] = parse_boolean(job_required_experience.get('experience_mentioned'))
-    transformed_data['job_required_experience_experience_preferred'] = parse_boolean(job_required_experience.get('experience_preferred'))
+        if lat is None or not (-90 <= lat <= 90):
+            transformed_data['job_latitude'] = None
+        if lon is None or not (-180 <= lon <= 180):
+            transformed_data['job_longitude'] = None
 
-    # Flatten 'job_required_education'
-    job_required_education = raw_data.get('job_required_education', {})
-    transformed_data['job_required_education_postgraduate_degree'] = parse_boolean(job_required_education.get('postgraduate_degree'))
-    transformed_data['job_required_education_professional_certification'] = parse_boolean(job_required_education.get('professional_certification'))
-    transformed_data['job_required_education_high_school'] = parse_boolean(job_required_education.get('high_school'))
-    transformed_data['job_required_education_associates_degree'] = parse_boolean(job_required_education.get('associates_degree'))
-    transformed_data['job_required_education_bachelors_degree'] = parse_boolean(job_required_education.get('bachelors_degree'))
-    transformed_data['job_required_education_degree_mentioned'] = parse_boolean(job_required_education.get('degree_mentioned'))
-    transformed_data['job_required_education_degree_preferred'] = parse_boolean(job_required_education.get('degree_preferred'))
-    transformed_data['job_required_education_professional_certification_mentioned'] = parse_boolean(job_required_education.get('professional_certification_mentioned'))
+        # Handle optional fields
+        transformed_data['job_benefits'] = job.get('job_benefits')
+        transformed_data['job_google_link'] = job.get('job_google_link')
 
-    # Other fields
-    transformed_data['job_experience_in_place_of_education'] = parse_boolean(raw_data.get('job_experience_in_place_of_education'))
-    transformed_data['job_min_salary'] = parse_float(raw_data.get('job_min_salary'))
-    transformed_data['job_max_salary'] = parse_float(raw_data.get('job_max_salary'))
-    transformed_data['job_salary_currency'] = raw_data.get('job_salary_currency', '').strip().upper()
-    transformed_data['job_salary_period'] = raw_data.get('job_salary_period', '').strip()
-    transformed_data['job_highlights'] = json.dumps(raw_data.get('job_highlights'))  # Convert dict to JSON string
-    transformed_data['job_job_title'] = raw_data.get('job_job_title', '').strip()
-    transformed_data['job_posting_language'] = raw_data.get('job_posting_language', '').strip()
-    transformed_data['job_onet_soc'] = raw_data.get('job_onet_soc', '').strip()
-    transformed_data['job_onet_job_zone'] = raw_data.get('job_onet_job_zone', '').strip()
-    transformed_data['job_occupational_categories'] = raw_data.get('job_occupational_categories')
-    transformed_data['job_naics_code'] = raw_data.get('job_naics_code', '').strip()
-    transformed_data['job_naics_name'] = raw_data.get('job_naics_name', '').strip()
+        # Offer expiration
+        job_offer_expiration_datetime_str = job.get('job_offer_expiration_datetime_utc')
+        if job_offer_expiration_datetime_str:
+            transformed_data['job_offer_expiration_datetime_utc'] = datetime.strptime(
+                job_offer_expiration_datetime_str, '%Y-%m-%dT%H:%M:%S.%fZ')
+        else:
+            transformed_data['job_offer_expiration_datetime_utc'] = None
+        transformed_data['job_offer_expiration_timestamp'] = parse_int(job.get('job_offer_expiration_timestamp'))
 
-    # 2. Handling Null and Missing Values
-    # Already handled via 'get' method and default values
+        # Flatten 'job_required_experience'
+        job_required_experience = job.get('job_required_experience', {})
+        transformed_data['job_required_experience_no_experience_required'] = parse_boolean(
+            job_required_experience.get('no_experience_required'))
+        transformed_data['job_required_experience_required_in_months'] = parse_int(
+            job_required_experience.get('required_experience_in_months'))
+        transformed_data['job_required_experience_experience_mentioned'] = parse_boolean(
+            job_required_experience.get('experience_mentioned'))
+        transformed_data['job_required_experience_experience_preferred'] = parse_boolean(
+            job_required_experience.get('experience_preferred'))
 
-    # 3. Data Validation
-    # Handled during type parsing and specific validations
+        # Flatten 'job_required_education'
+        job_required_education = job.get('job_required_education', {})
+        transformed_data['job_required_education_postgraduate_degree'] = parse_boolean(
+            job_required_education.get('postgraduate_degree'))
+        transformed_data['job_required_education_professional_certification'] = parse_boolean(
+            job_required_education.get('professional_certification'))
+        transformed_data['job_required_education_high_school'] = parse_boolean(
+            job_required_education.get('high_school'))
+        transformed_data['job_required_education_associates_degree'] = parse_boolean(
+            job_required_education.get('associates_degree'))
+        transformed_data['job_required_education_bachelors_degree'] = parse_boolean(
+            job_required_education.get('bachelors_degree'))
+        transformed_data['job_required_education_degree_mentioned'] = parse_boolean(
+            job_required_education.get('degree_mentioned'))
+        transformed_data['job_required_education_degree_preferred'] = parse_boolean(
+            job_required_education.get('degree_preferred'))
+        transformed_data['job_required_education_professional_certification_mentioned'] = parse_boolean(
+            job_required_education.get('professional_certification_mentioned'))
 
-    # 4. Consistency Checks
-    # Salary fields consistency
-    min_salary = transformed_data['job_min_salary']
-    max_salary = transformed_data['job_max_salary']
-    if min_salary and max_salary and min_salary > max_salary:
-        # Swap values if min_salary is greater than max_salary
-        transformed_data['job_min_salary'], transformed_data['job_max_salary'] = max_salary, min_salary
+        # Other fields
+        transformed_data['job_experience_in_place_of_education'] = parse_boolean(
+            job.get('job_experience_in_place_of_education'))
+        transformed_data['job_min_salary'] = parse_float(job.get('job_min_salary'))
+        transformed_data['job_max_salary'] = parse_float(job.get('job_max_salary'))
+        transformed_data['job_salary_currency'] = job.get('job_salary_currency', '').strip().upper()
+        transformed_data['job_salary_period'] = job.get('job_salary_period', '').strip()
+        transformed_data['job_highlights'] = json.dumps(job.get('job_highlights'))  # Convert dict to JSON string
+        transformed_data['job_job_title'] = job.get('job_job_title', '').strip()
+        transformed_data['job_posting_language'] = job.get('job_posting_language', '').strip()
+        transformed_data['job_onet_soc'] = job.get('job_onet_soc', '').strip()
+        transformed_data['job_onet_job_zone'] = job.get('job_onet_job_zone', '').strip()
+        transformed_data['job_occupational_categories'] = job.get('job_occupational_categories')
+        transformed_data['job_naics_code'] = job.get('job_naics_code', '').strip()
+        transformed_data['job_naics_name'] = job.get('job_naics_name', '').strip()
 
-    # Experience fields consistency
-    if transformed_data['job_required_experience_no_experience_required']:
-        transformed_data['job_required_experience_required_in_months'] = 0
+        # 2. Handling Null and Missing Values
+        # Already handled via 'get' method and default values
 
-    # 5. Process 'apply_options' separately
-    apply_options = raw_data.get('apply_options', [])
-    transformed_apply_options = []
-    for option in apply_options:
-        option_data = {
-            'job_id': transformed_data['job_id'],
-            'publisher': option.get('publisher', '').strip(),
-            'apply_link': option.get('apply_link'),
-            'is_direct': parse_boolean(option.get('is_direct'))
-        }
-        # Validate 'apply_link' URL
-        if option_data['apply_link'] and not validate_url(option_data['apply_link']):
-            option_data['apply_link'] = None
-        transformed_apply_options.append(option_data)
+        # 3. Data Validation
+        # Handled during type parsing and specific validations
+
+        # 4. Consistency Checks
+        # Salary fields consistency
+        min_salary = transformed_data['job_min_salary']
+        max_salary = transformed_data['job_max_salary']
+        if min_salary and max_salary and min_salary > max_salary:
+            # Swap values if min_salary is greater than max_salary
+            transformed_data['job_min_salary'], transformed_data['job_max_salary'] = max_salary, min_salary
+
+        # Experience fields consistency
+        if transformed_data['job_required_experience_no_experience_required']:
+            transformed_data['job_required_experience_required_in_months'] = 0
+
+        # Add the transformed data to the list
+        transformed_jobs.append(transformed_data)
+
+        # 5. Process 'apply_options' separately
+        apply_options = job.get('apply_options', [])
+        for option in apply_options:
+            option_data = {
+                'job_id': transformed_data['job_id'],
+                'publisher': option.get('publisher', '').strip(),
+                'apply_link': option.get('apply_link'),
+                'is_direct': parse_boolean(option.get('is_direct'))
+            }
+            # Validate 'apply_link' URL
+            if option_data['apply_link'] and not validate_url(option_data['apply_link']):
+                option_data['apply_link'] = None
+            transformed_apply_options_list.append(option_data)
 
     # Push transformed data to XCom
-    context['ti'].xcom_push(key='transformed_data', value=transformed_data)
-    context['ti'].xcom_push(key='transformed_apply_options', value=transformed_apply_options)
+    context['ti'].xcom_push(key='transformed_data_list', value=transformed_jobs)
+    context['ti'].xcom_push(key='transformed_apply_options_list', value=transformed_apply_options_list)
 
 
 def load_data(**context):
@@ -305,8 +328,8 @@ def load_data(**context):
 
     logging.info("Starting load_data task")
 
-    transformed_data = context['ti'].xcom_pull(key='transformed_data', task_ids='transform_data')
-    transformed_apply_options = context['ti'].xcom_pull(key='transformed_apply_options', task_ids='transform_data')
+    transformed_data_list = context['ti'].xcom_pull(key='transformed_data_list', task_ids='transform_data')
+    transformed_apply_options_list = context['ti'].xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
 
     try:
         pg_hook = PostgresHook(postgres_conn_id=postgres_airflow_conn)
@@ -384,18 +407,21 @@ def load_data(**context):
         cursor.execute(create_apply_options_table_sql)
 
         # Insert into 'job_search' table
-        job_columns = ', '.join(transformed_data.keys())
-        job_placeholders = ', '.join(['%s'] * len(transformed_data))
-        job_insert_query = f"""
-            INSERT INTO job_search ({job_columns})
-            VALUES ({job_placeholders})
-            ON CONFLICT (job_id) DO NOTHING
-        """
-        cursor.execute(job_insert_query, list(transformed_data.values()))
+        if transformed_data_list:
+            job_columns = transformed_data_list[0].keys()
+            job_columns_str = ', '.join(job_columns)
+            job_placeholders = ', '.join(['%s'] * len(job_columns))
+            job_insert_query = f"""
+                INSERT INTO job_search ({job_columns_str})
+                VALUES ({job_placeholders})
+                ON CONFLICT (job_id) DO NOTHING
+            """
+            job_values = [tuple(job[col] for col in job_columns) for job in transformed_data_list]
+            cursor.executemany(job_insert_query, job_values)
 
         # Insert into 'apply_options' table
-        if transformed_apply_options:
-            apply_columns = list(transformed_apply_options[0].keys())
+        if transformed_apply_options_list:
+            apply_columns = transformed_apply_options_list[0].keys()
             apply_columns_str = ', '.join(apply_columns)
             apply_placeholders = ', '.join(['%s'] * len(apply_columns))
 
@@ -409,9 +435,7 @@ def load_data(**context):
                 ON CONFLICT ({conflict_columns_str}) DO UPDATE SET
                 {', '.join([f"{col}=EXCLUDED.{col}" for col in update_columns])}
             """
-
-            apply_values = [tuple(option[col] for col in apply_columns) for option in transformed_apply_options]
-
+            apply_values = [tuple(option[col] for col in apply_columns) for option in transformed_apply_options_list]
             cursor.executemany(apply_insert_query, apply_values)
 
         conn.commit()
@@ -459,12 +483,6 @@ transform = PythonOperator(
     python_callable=transform_data,
     provide_context=True
 )
-
-# load_json_to_postgres_task = PythonOperator(
-#     task_id='load_json_to_postgres',
-#     python_callable=load_json_to_postgres,
-#     dag=dag,
-# )
 
 load = PythonOperator(
     task_id='load_data',
