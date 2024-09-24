@@ -112,6 +112,23 @@ def extract_data(**context):
         data = json.load(file)
     context['ti'].xcom_push(key='raw_data', value=data)
 
+def extract_data(**context):
+    import json
+    # Read JSON data from a file
+    s3_file_key = "job_search/job_search_response.json"
+    local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
+    print(f"File downloaded from s3://{bucket}/{s3_file_key} and written to variable local_file_path: {local_file_path}")
+
+    try:
+        with open(local_file_path, 'r') as file:
+            data = json.load(file)
+        # Push data to XCom
+        context['ti'].xcom_push(key='raw_data', value=data)
+    except Exception as e:
+        # Log the error and re-raise
+        print(f"Error in extract_data: {e}")
+        raise e
+
 def transform_data(**context):
     import re
     from datetime import datetime
@@ -496,13 +513,13 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 1,
-    'retry_delay': timedelta(minutes=5),
+    'retry_delay': timedelta(minutes=1),
 }
 
 dag = DAG(
     'import_job_search',
     default_args=default_args,
-    description='A DAG to import job_search_response.json from S3 into PostgreSQL',
+    description='A DAG to call job search API, export JSON to S3, then import job_search_response.json from S3 into PostgreSQL',
     schedule_interval=timedelta(days=1),
 )
 
