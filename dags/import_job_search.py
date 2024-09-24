@@ -7,7 +7,6 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime, timedelta
 import requests
 import logging
-import tempfile
 import json
 import os
 
