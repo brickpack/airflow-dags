@@ -162,6 +162,10 @@ def transform_data(**context):
             return all([result.scheme, result.netloc])
         except:
             return False
+        
+    def clean_job_field(value):
+        return (value or '').strip()
+
 
     # List to store all transformed jobs
     transformed_jobs = []
@@ -180,10 +184,10 @@ def transform_data(**context):
         logging.info(f"Processing job_id: {transformed_data['job_id']}")
 
         # 1. Data Type Conversion and Normalization
-        transformed_data['employer_name'] = job.get('employer_name', '').strip()
+        transformed_data['employer_name'] = clean_job_field(job.get('employer_name', ''))
         transformed_data['employer_logo'] = job.get('employer_logo')
         transformed_data['employer_website'] = job.get('employer_website')
-        transformed_data['employer_company_type'] = job.get('employer_company_type', '').strip()
+        transformed_data['employer_company_type'] = clean_job_field(job.get('employer_company_type', ''))
         transformed_data['employer_linkedin'] = job.get('employer_linkedin')
 
         # Validate URLs
@@ -194,13 +198,13 @@ def transform_data(**context):
                 transformed_data[field] = None  # Invalid URL, set to None
 
         # Continue processing other fields...
-        transformed_data['job_publisher'] = job.get('job_publisher', '').strip()
-        transformed_data['job_employment_type'] = job.get('job_employment_type', '').strip().upper()
-        transformed_data['job_title'] = job.get('job_title', '').strip()
+        transformed_data['job_publisher'] = clean_job_field(job.get('job_publisher', ''))
+        transformed_data['job_employment_type'] = clean_job_field(job.get('job_employment_type', '')).upper()
+        transformed_data['job_title'] = clean_job_field(job.get('job_title', ''))
         transformed_data['job_apply_link'] = job.get('job_apply_link')
         transformed_data['job_apply_is_direct'] = parse_boolean(job.get('job_apply_is_direct'))
         transformed_data['job_apply_quality_score'] = parse_float(job.get('job_apply_quality_score'))
-        transformed_data['job_description'] = job.get('job_description', '').strip()
+        transformed_data['job_description'] = clean_job_field(job.get('job_description', ''))
         transformed_data['job_is_remote'] = parse_boolean(job.get('job_is_remote'))
 
         # Convert timestamps
@@ -213,9 +217,9 @@ def transform_data(**context):
             transformed_data['job_posted_at_datetime_utc'] = None
 
         # Location data
-        transformed_data['job_city'] = job.get('job_city', '').strip()
-        transformed_data['job_state'] = job.get('job_state', '').strip()
-        transformed_data['job_country'] = job.get('job_country', '').strip().upper()
+        transformed_data['job_city'] = clean_job_field(job.get('job_city', ''))
+        transformed_data['job_state'] = clean_job_field(job.get('job_state', ''))
+        transformed_data['job_country'] = clean_job_field(job.get('job_country', '')).upper()
         transformed_data['job_latitude'] = parse_float(job.get('job_latitude'))
         transformed_data['job_longitude'] = parse_float(job.get('job_longitude'))
 
@@ -276,16 +280,16 @@ def transform_data(**context):
             job.get('job_experience_in_place_of_education'))
         transformed_data['job_min_salary'] = parse_float(job.get('job_min_salary'))
         transformed_data['job_max_salary'] = parse_float(job.get('job_max_salary'))
-        transformed_data['job_salary_currency'] = (job.get('job_salary_currency') or '').strip().upper()
-        transformed_data['job_salary_period'] = job.get('job_salary_period', '').strip()
+        transformed_data['job_salary_currency'] = clean_job_field((job.get('job_salary_currency') or '')).upper()
+        transformed_data['job_salary_period'] = clean_job_field(job.get('job_salary_period', ''))
         transformed_data['job_highlights'] = json.dumps(job.get('job_highlights'))  # Convert dict to JSON string
-        transformed_data['job_job_title'] = job.get('job_job_title', '').strip()
-        transformed_data['job_posting_language'] = job.get('job_posting_language', '').strip()
-        transformed_data['job_onet_soc'] = job.get('job_onet_soc', '').strip()
-        transformed_data['job_onet_job_zone'] = job.get('job_onet_job_zone', '').strip()
+        transformed_data['job_job_title'] = clean_job_field(job.get('job_job_title', ''))
+        transformed_data['job_posting_language'] = clean_job_field(job.get('job_posting_language', ''))
+        transformed_data['job_onet_soc'] = clean_job_field(job.get('job_onet_soc', ''))
+        transformed_data['job_onet_job_zone'] = clean_job_field(job.get('job_onet_job_zone', ''))
         transformed_data['job_occupational_categories'] = job.get('job_occupational_categories')
-        transformed_data['job_naics_code'] = job.get('job_naics_code', '').strip()
-        transformed_data['job_naics_name'] = job.get('job_naics_name', '').strip()
+        transformed_data['job_naics_code'] = clean_job_field(job.get('job_naics_code', ''))
+        transformed_data['job_naics_name'] = clean_job_field(job.get('job_naics_name', ''))
 
         # 2. Handling Null and Missing Values
         # Already handled via 'get' method and default values
