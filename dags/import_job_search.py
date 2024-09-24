@@ -127,6 +127,8 @@ def transform_data(**context):
     from datetime import datetime
     from urllib.parse import urlparse
 
+    
+
     logging.info("Pulling raw_data from XCom")
     raw_data = context['ti'].xcom_pull(key='raw_data', task_ids='extract_data')
     if raw_data is None:
@@ -174,6 +176,8 @@ def transform_data(**context):
         if not transformed_data['job_id']:
             logging.error("Job ID is missing or empty.")
             continue  # Skip this job or handle accordingly
+
+        logging.info(f"Processing job_id: {transformed_data['job_id']}")
 
         # 1. Data Type Conversion and Normalization
         transformed_data['employer_name'] = job.get('employer_name', '').strip()
