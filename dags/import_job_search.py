@@ -361,11 +361,12 @@ def load_data(**context):
         );
         
         CREATE TABLE IF NOT EXISTS apply_options (
+            id INT,
             job_id VARCHAR(255),
             publisher VARCHAR(100),
             apply_link TEXT,
             is_direct BOOLEAN,
-            FOREIGN KEY (job_id) REFERENCES job_search_responses(job_id)
+            FOREIGN KEY (id) REFERENCES job_search_responses(id)
         );
         """
         cursor.execute(create_table_sql)
