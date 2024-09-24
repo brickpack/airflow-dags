@@ -139,9 +139,11 @@ def transform_data(**context):
         if isinstance(value, str):
             return value.lower() == 'true'
         return bool(value)
-    
+        
     def parse_float(value):
         try:
+            if value is None or value == '':
+                return None
             return float(value)
         except (TypeError, ValueError):
             return None
@@ -200,9 +202,12 @@ def transform_data(**context):
     transformed_data['job_longitude'] = parse_float(raw_data.get('job_longitude'))
 
     # Validate geographical data
-    if not (-90 <= transformed_data['job_latitude'] <= 90):
+    lat = transformed_data['job_latitude']
+    lon = transformed_data['job_longitude']
+
+    if lat is None or not (-90 <= lat <= 90):
         transformed_data['job_latitude'] = None
-    if not (-180 <= transformed_data['job_longitude'] <= 180):
+    if lon is None or not (-180 <= lon <= 180):
         transformed_data['job_longitude'] = None
 
     # Handle optional fields
