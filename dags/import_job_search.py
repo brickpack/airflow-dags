@@ -103,62 +103,345 @@ def download_from_s3(bucket, object_name):
         print(f"Failed to download {object_name} from S3: {e}")
         raise
 
-def load_json_to_postgres():
-    """Load the JSON data from S3 and insert it into PostgreSQL."""
-    # Download the JSON file from S3 into the manually defined file path
+def extract_data(**context):
+    # Read JSON data from a file
     s3_file_key = "job_search/job_search_response.json"
     local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
 
-    # Ensure the file exists after downloading
-    if not os.path.exists(local_file_path):
-        raise FileNotFoundError(f"File {local_file_path} was not downloaded from S3.")
-    
-    # Read the JSON file and insert it into PostgreSQL
     with open(local_file_path, 'r') as file:
         data = json.load(file)
+    context['ti'].xcom_push(key='raw_data', value=data)
+
+def transform_data(**context):
+    import re
+    from datetime import datetime
+    from urllib.parse import urlparse
+
+    raw_data = context['ti'].xcom_pull(key='raw_data', task_ids='extract_data_task')
+    transformed_data = {}
+    
+    # Helper functions
+    def parse_boolean(value):
+        if isinstance(value, str):
+            return value.lower() == 'true'
+        return bool(value)
+    
+    def parse_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    
+    def parse_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    
+    def validate_url(url):
+        try:
+            result = urlparse(url)
+            return all([result.scheme, result.netloc])
+        except:
+            return False
+
+    # 1. Data Type Conversion and Normalization
+    transformed_data['job_id'] = raw_data.get('job_id', '').strip()
+    transformed_data['employer_name'] = raw_data.get('employer_name', '').strip()
+    transformed_data['employer_logo'] = raw_data.get('employer_logo')
+    transformed_data['employer_website'] = raw_data.get('employer_website')
+    transformed_data['employer_company_type'] = raw_data.get('employer_company_type', '').strip()
+    transformed_data['employer_linkedin'] = raw_data.get('employer_linkedin')
+
+    # Validate URLs
+    url_fields = ['employer_logo', 'employer_website', 'employer_linkedin']
+    for field in url_fields:
+        url = transformed_data.get(field)
+        if url and not validate_url(url):
+            transformed_data[field] = None  # Invalid URL, set to None
+
+    # Continue processing other fields...
+    transformed_data['job_publisher'] = raw_data.get('job_publisher', '').strip()
+    transformed_data['job_employment_type'] = raw_data.get('job_employment_type', '').strip().upper()
+    transformed_data['job_title'] = raw_data.get('job_title', '').strip()
+    transformed_data['job_apply_link'] = raw_data.get('job_apply_link')
+    transformed_data['job_apply_is_direct'] = parse_boolean(raw_data.get('job_apply_is_direct'))
+    transformed_data['job_apply_quality_score'] = parse_float(raw_data.get('job_apply_quality_score'))
+    transformed_data['job_description'] = raw_data.get('job_description', '').strip()
+    transformed_data['job_is_remote'] = parse_boolean(raw_data.get('job_is_remote'))
+
+    # Convert timestamps
+    transformed_data['job_posted_at_timestamp'] = parse_int(raw_data.get('job_posted_at_timestamp'))
+    job_posted_at_datetime_str = raw_data.get('job_posted_at_datetime_utc')
+    if job_posted_at_datetime_str:
+        transformed_data['job_posted_at_datetime_utc'] = datetime.strptime(job_posted_at_datetime_str, '%Y-%m-%dT%H:%M:%S.%fZ')
+    else:
+        transformed_data['job_posted_at_datetime_utc'] = None
+
+    # Location data
+    transformed_data['job_city'] = raw_data.get('job_city', '').strip()
+    transformed_data['job_state'] = raw_data.get('job_state', '').strip()
+    transformed_data['job_country'] = raw_data.get('job_country', '').strip().upper()
+    transformed_data['job_latitude'] = parse_float(raw_data.get('job_latitude'))
+    transformed_data['job_longitude'] = parse_float(raw_data.get('job_longitude'))
+
+    # Validate geographical data
+    if not (-90 <= transformed_data['job_latitude'] <= 90):
+        transformed_data['job_latitude'] = None
+    if not (-180 <= transformed_data['job_longitude'] <= 180):
+        transformed_data['job_longitude'] = None
+
+    # Handle optional fields
+    transformed_data['job_benefits'] = raw_data.get('job_benefits')
+    transformed_data['job_google_link'] = raw_data.get('job_google_link')
+
+    # Offer expiration
+    job_offer_expiration_datetime_str = raw_data.get('job_offer_expiration_datetime_utc')
+    if job_offer_expiration_datetime_str:
+        transformed_data['job_offer_expiration_datetime_utc'] = datetime.strptime(job_offer_expiration_datetime_str, '%Y-%m-%dT%H:%M:%S.%fZ')
+    else:
+        transformed_data['job_offer_expiration_datetime_utc'] = None
+    transformed_data['job_offer_expiration_timestamp'] = parse_int(raw_data.get('job_offer_expiration_timestamp'))
+
+    # Flatten 'job_required_experience'
+    job_required_experience = raw_data.get('job_required_experience', {})
+    transformed_data['job_required_experience_no_experience_required'] = parse_boolean(job_required_experience.get('no_experience_required'))
+    transformed_data['job_required_experience_required_in_months'] = parse_int(job_required_experience.get('required_experience_in_months'))
+    transformed_data['job_required_experience_experience_mentioned'] = parse_boolean(job_required_experience.get('experience_mentioned'))
+    transformed_data['job_required_experience_experience_preferred'] = parse_boolean(job_required_experience.get('experience_preferred'))
+
+    # Flatten 'job_required_education'
+    job_required_education = raw_data.get('job_required_education', {})
+    transformed_data['job_required_education_postgraduate_degree'] = parse_boolean(job_required_education.get('postgraduate_degree'))
+    transformed_data['job_required_education_professional_certification'] = parse_boolean(job_required_education.get('professional_certification'))
+    transformed_data['job_required_education_high_school'] = parse_boolean(job_required_education.get('high_school'))
+    transformed_data['job_required_education_associates_degree'] = parse_boolean(job_required_education.get('associates_degree'))
+    transformed_data['job_required_education_bachelors_degree'] = parse_boolean(job_required_education.get('bachelors_degree'))
+    transformed_data['job_required_education_degree_mentioned'] = parse_boolean(job_required_education.get('degree_mentioned'))
+    transformed_data['job_required_education_degree_preferred'] = parse_boolean(job_required_education.get('degree_preferred'))
+    transformed_data['job_required_education_professional_certification_mentioned'] = parse_boolean(job_required_education.get('professional_certification_mentioned'))
+
+    # Other fields
+    transformed_data['job_experience_in_place_of_education'] = parse_boolean(raw_data.get('job_experience_in_place_of_education'))
+    transformed_data['job_min_salary'] = parse_float(raw_data.get('job_min_salary'))
+    transformed_data['job_max_salary'] = parse_float(raw_data.get('job_max_salary'))
+    transformed_data['job_salary_currency'] = raw_data.get('job_salary_currency', '').strip().upper()
+    transformed_data['job_salary_period'] = raw_data.get('job_salary_period', '').strip()
+    transformed_data['job_highlights'] = json.dumps(raw_data.get('job_highlights'))  # Convert dict to JSON string
+    transformed_data['job_job_title'] = raw_data.get('job_job_title', '').strip()
+    transformed_data['job_posting_language'] = raw_data.get('job_posting_language', '').strip()
+    transformed_data['job_onet_soc'] = raw_data.get('job_onet_soc', '').strip()
+    transformed_data['job_onet_job_zone'] = raw_data.get('job_onet_job_zone', '').strip()
+    transformed_data['job_occupational_categories'] = raw_data.get('job_occupational_categories')
+    transformed_data['job_naics_code'] = raw_data.get('job_naics_code', '').strip()
+    transformed_data['job_naics_name'] = raw_data.get('job_naics_name', '').strip()
+
+    # 2. Handling Null and Missing Values
+    # Already handled via 'get' method and default values
+
+    # 3. Data Validation
+    # Handled during type parsing and specific validations
+
+    # 4. Consistency Checks
+    # Salary fields consistency
+    min_salary = transformed_data['job_min_salary']
+    max_salary = transformed_data['job_max_salary']
+    if min_salary and max_salary and min_salary > max_salary:
+        # Swap values if min_salary is greater than max_salary
+        transformed_data['job_min_salary'], transformed_data['job_max_salary'] = max_salary, min_salary
+
+    # Experience fields consistency
+    if transformed_data['job_required_experience_no_experience_required']:
+        transformed_data['job_required_experience_required_in_months'] = 0
+
+    # 5. Process 'apply_options' separately
+    apply_options = raw_data.get('apply_options', [])
+    transformed_apply_options = []
+    for option in apply_options:
+        option_data = {
+            'job_id': transformed_data['job_id'],
+            'publisher': option.get('publisher', '').strip(),
+            'apply_link': option.get('apply_link'),
+            'is_direct': parse_boolean(option.get('is_direct'))
+        }
+        # Validate 'apply_link' URL
+        if option_data['apply_link'] and not validate_url(option_data['apply_link']):
+            option_data['apply_link'] = None
+        transformed_apply_options.append(option_data)
+
+    # Push transformed data to XCom
+    context['ti'].xcom_push(key='transformed_data', value=transformed_data)
+    context['ti'].xcom_push(key='transformed_apply_options', value=transformed_apply_options)
+
+
+def load_data(**context):
+    # import psycopg2
+    # from psycopg2.extras import execute_values
+
+    transformed_data = context['ti'].xcom_pull(key='transformed_data', task_ids='transform_data')
+    transformed_apply_options = context['ti'].xcom_pull(key='transformed_apply_options', task_ids='transform_data')
+
+    # # Database connection parameters
+    # db_params = {
+    #     'dbname': 'jobs_db',
+    #     'user': 'user',
+    #     'password': 'pass',
+    #     'host': 'localhost',
+    #     'port': 5432
+    # }
+
+    try:
+
+        pg_hook = PostgresHook(postgres_conn_id=postgres_airflow_conn)
+        conn = pg_hook.get_conn()
+        cursor = conn.cursor()
+
+        # conn = psycopg2.connect(**db_params)
+        # cursor = conn.cursor()
+
+        # Insert into 'job_search' table
+        job_columns = ', '.join(transformed_data.keys())
+        job_placeholders = ', '.join(['%s'] * len(transformed_data))
+        job_insert_query = f"INSERT INTO job_search ({job_columns}) VALUES ({job_placeholders}) ON CONFLICT (job_id) DO NOTHING"
+
+        cursor.execute(job_insert_query, list(transformed_data.values()))
+
+        # Insert into 'apply_options' table
+        if transformed_apply_options:
+            apply_columns = list(transformed_apply_options[0].keys())
+            apply_columns_str = ', '.join(apply_columns)
+            apply_placeholders = ', '.join(['%s'] * len(apply_columns))  # Adjust placeholder as needed
+
+            apply_insert_query = f"""
+                INSERT INTO apply_options ({apply_columns_str})
+                VALUES ({apply_placeholders})
+                ON DUPLICATE KEY UPDATE
+                {', '.join([f"{col}=VALUES({col})" for col in apply_columns if col != 'job_id'])}
+            """
+
+            apply_values = [tuple(option[col] for col in apply_columns) for option in transformed_apply_options]
+
+            cursor.executemany(apply_insert_query, apply_values)
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def load_json_to_postgres():
+    """Load the JSON data from S3 and insert it into PostgreSQL."""
+    # # Download the JSON file from S3 into the manually defined file path
+    # s3_file_key = "job_search/job_search_response.json"
+    # local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
+
+    # # Ensure the file exists after downloading
+    # if not os.path.exists(local_file_path):
+    #     raise FileNotFoundError(f"File {local_file_path} was not downloaded from S3.")
+    
+    # # Read the JSON file and insert it into PostgreSQL
+    # with open(local_file_path, 'r') as file:
+    #     data = json.load(file)
 
     pg_hook = PostgresHook(postgres_conn_id=postgres_airflow_conn)
     conn = pg_hook.get_conn()
     cursor = conn.cursor()
 
     create_table_sql = """
-    CREATE TABLE IF NOT EXISTS job_search_responses (
+    CREATE TABLE IF NOT EXISTS job_search (
         id SERIAL PRIMARY KEY,
+        job_id VARCHAR(255),
+        employer_name VARCHAR(255),
+        employer_logo TEXT,
+        employer_website VARCHAR(255),
+        employer_company_type VARCHAR(100),
+        employer_linkedin VARCHAR(255),
+        job_publisher VARCHAR(100),
+        job_employment_type VARCHAR(50),
         job_title VARCHAR(255),
-        company VARCHAR(255),
-        location VARCHAR(255),
-        description TEXT,
-        date_posted DATE
+        job_apply_link TEXT,
+        job_apply_is_direct BOOLEAN,
+        job_apply_quality_score FLOAT,
+        job_description TEXT,
+        job_is_remote BOOLEAN,
+        job_posted_at_timestamp BIGINT,
+        job_posted_at_datetime_utc TIMESTAMP,
+        job_city VARCHAR(100),
+        job_state VARCHAR(100),
+        job_country VARCHAR(10),
+        job_latitude FLOAT,
+        job_longitude FLOAT,
+        job_benefits TEXT,
+        job_google_link TEXT,
+        job_offer_expiration_datetime_utc TIMESTAMP,
+        job_offer_expiration_timestamp BIGINT,
+        job_required_experience_no_experience_required BOOLEAN,
+        job_required_experience_required_in_months INT,
+        job_required_experience_experience_mentioned BOOLEAN,
+        job_required_experience_experience_preferred BOOLEAN,
+        job_required_skills TEXT,
+        job_required_education_postgraduate_degree BOOLEAN,
+        job_required_education_professional_certification BOOLEAN,
+        job_required_education_high_school BOOLEAN,
+        job_required_education_associates_degree BOOLEAN,
+        job_required_education_bachelors_degree BOOLEAN,
+        job_required_education_degree_mentioned BOOLEAN,
+        job_required_education_degree_preferred BOOLEAN,
+        job_required_education_professional_certification_mentioned BOOLEAN,
+        job_experience_in_place_of_education BOOLEAN,
+        job_min_salary DECIMAL(10,2),
+        job_max_salary DECIMAL(10,2),
+        job_salary_currency VARCHAR(10),
+        job_salary_period VARCHAR(50),
+        job_highlights TEXT,
+        job_job_title VARCHAR(255),
+        job_posting_language VARCHAR(10),
+        job_onet_soc VARCHAR(20),
+        job_onet_job_zone VARCHAR(20),
+        job_occupational_categories TEXT,
+        job_naics_code VARCHAR(20),
+        job_naics_name VARCHAR(255)
+    );
+    
+    CREATE TABLE IF NOT EXSISTS apply_options (
+        job_id VARCHAR(255),
+        publisher VARCHAR(100),
+        apply_link TEXT,
+        is_direct BOOLEAN,
+        FOREIGN KEY (job_id) REFERENCES job_search_responses(job_id)
     );
     """
     cursor.execute(create_table_sql)
 
-    # Insert data into PostgreSQL
-    for job in data['data']:
-        insert_sql = """
-        INSERT INTO job_search_responses (job_title, company, location, description, date_posted)
-        VALUES (%s, %s, %s, %s, %s);
-        """
-        cursor.execute(insert_sql, (
-            job['job_title'],
-            job['employer_name'],
-            f"{job['job_city']}, {job['job_state']}, {job['job_country']}",
-            job['job_description'],
-            job['job_posted_at_datetime_utc']
-        ))
+    # # Insert data into PostgreSQL
+    # for job in data['data']: 
+    #     insert_sql = """
+    #     INSERT INTO job_search_responses (job_title, company, location, description, date_posted)
+    #     VALUES (%s, %s, %s, %s, %s);
+    #     """
+    #     cursor.execute(insert_sql, (
+    #         job['job_title'],
+    #         job['employer_name'],
+    #         f"{job['job_city']}, {job['job_state']}, {job['job_country']}",
+    #         job['job_description'],
+    #         job['job_posted_at_datetime_utc']
+    #     ))
 
-    conn.commit()
-    cursor.close()
-    conn.close()
-    print("Data loaded into PostgreSQL successfully.")
+    # conn.commit()
+    # cursor.close()
+    # conn.close()
+    # print("Data loaded into PostgreSQL successfully.")
 
-    # Optionally, delete the temporary file after use
-    os.remove(local_file_path)
+    # # Optionally, delete the temporary file after use
+    # os.remove(local_file_path)
 
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'start_date': datetime(2024, 9, 23),
+    'start_date': datetime(2024, 9, 24),
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 1,
@@ -178,10 +461,22 @@ call_job_search_api_task = PythonOperator(
     dag=dag,
 )
 
+extract = PythonOperator(
+    task_id='extract_data',
+    python_callable=extract_data,
+    provide_context=True
+)
+
+transform = PythonOperator(
+    task_id='transform_data',
+    python_callable=transform_data,
+    provide_context=True
+)
+
 load_json_to_postgres_task = PythonOperator(
     task_id='load_json_to_postgres',
     python_callable=load_json_to_postgres,
     dag=dag,
 )
 
-call_job_search_api_task >> load_json_to_postgres_task
+call_job_search_api_task >> extract >> transform >> load_json_to_postgres_task
