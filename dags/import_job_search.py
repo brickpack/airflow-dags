@@ -75,25 +75,24 @@ def call_job_search_api():
         raise
 
 def download_from_s3(bucket, object_name):
-    """Download a file from an S3 bucket using Airflow's S3Hook and NamedTemporaryFile."""
+    """Download a file from an S3 bucket using Airflow's S3Hook and a manually defined file path."""
     s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
-    
-    # Ensure the directory exists and is writable
+
+    # Manually define the file path
     tmp_dir = "/opt/airflow/tmp"
+    file_name = "job_search_response.json"
+    local_file_path = os.path.join(tmp_dir, file_name)
+
+    # Ensure the directory exists
     if not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir, exist_ok=True)  # Create the directory if it doesn't exist
         print(f"Directory {tmp_dir} created.")
-        
+
     try:
-        # Use NamedTemporaryFile to create a secure temporary file
-        with tempfile.NamedTemporaryFile(delete=False, dir="/opt/airflow/tmp") as tmp_file:
-            tmp_file_path = tmp_file.name  # Get the file path
-            print(f"Temporary file created at {tmp_file_path}")
-        
-        # Download the file from S3 to the named temporary file
-        s3_hook.download_file(key=object_name, bucket_name=bucket, local_path=tmp_file_path)
-        print(f"File downloaded from s3://{bucket}/{object_name} to {tmp_file_path}")
-        return tmp_file_path  # Return the temp file path for further use
+        # Download the file from S3 to the explicitly defined file path
+        s3_hook.download_file(key=object_name, bucket_name=bucket, local_path=local_file_path)
+        print(f"File downloaded from s3://{bucket}/{object_name} to {local_file_path}")
+        return local_file_path  # Return the temp file path for further use
 
     except Exception as e:
         print(f"Failed to download {object_name} from S3: {e}")
@@ -101,9 +100,9 @@ def download_from_s3(bucket, object_name):
 
 def load_json_to_postgres():
     """Load the JSON data from S3 and insert it into PostgreSQL."""
-    # Download the JSON file from S3 into a temporary file
+    # Download the JSON file from S3 into the manually defined file path
     s3_file_key = "job_search/job_search_response.json"
-    local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the temp file path
+    local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
 
     # Ensure the file exists after downloading
     if not os.path.exists(local_file_path):
@@ -145,8 +144,8 @@ def load_json_to_postgres():
     conn.commit()
     cursor.close()
     conn.close()
-    print("Data has been loaded into PostgreSQL.")
-    
+    print("Data loaded into PostgreSQL.")
+
     # Optionally, delete the temporary file after use
     os.remove(local_file_path)
 
