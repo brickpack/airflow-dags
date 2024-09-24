@@ -276,7 +276,7 @@ def transform_data(**context):
             job.get('job_experience_in_place_of_education'))
         transformed_data['job_min_salary'] = parse_float(job.get('job_min_salary'))
         transformed_data['job_max_salary'] = parse_float(job.get('job_max_salary'))
-        transformed_data['job_salary_currency'] = job.get('job_salary_currency', '').strip().upper()
+        transformed_data['job_salary_currency'] = (job.get('job_salary_currency') or '').strip().upper()
         transformed_data['job_salary_period'] = job.get('job_salary_period', '').strip()
         transformed_data['job_highlights'] = json.dumps(job.get('job_highlights'))  # Convert dict to JSON string
         transformed_data['job_job_title'] = job.get('job_job_title', '').strip()
