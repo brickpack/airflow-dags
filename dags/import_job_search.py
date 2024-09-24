@@ -74,7 +74,7 @@ def call_job_search_api():
         raise
 
 def download_from_s3(bucket, object_name):
-    """Download a file from an S3 bucket using Airflow's S3Hook and a manually defined file path."""
+    """Download a file from an S3 bucket using Airflow's S3Hook and manually write it to a file."""
     s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
 
     # Manually define the file path
@@ -88,10 +88,16 @@ def download_from_s3(bucket, object_name):
         print(f"Directory {tmp_dir} created.")
 
     try:
-        # Download the file from S3 to the explicitly defined file path
-        s3_hook.download_file(key=object_name, bucket_name=bucket, local_path=local_file_path)
-        print(f"File downloaded from s3://{bucket}/{object_name} to {local_file_path}")
-        return local_file_path  # Return the temp file path for further use
+        # Fetch the S3 object as bytes
+        s3_object = s3_hook.get_key(key=object_name, bucket_name=bucket)
+        file_data = s3_object.get()['Body'].read()  # Read the S3 object content as bytes
+        
+        # Write the S3 object data to a local file
+        with open(local_file_path, "wb") as f:
+            f.write(file_data)
+            print(f"File downloaded from s3://{bucket}/{object_name} and written to {local_file_path}")
+        
+        return local_file_path  # Return the file path for further use
 
     except Exception as e:
         print(f"Failed to download {object_name} from S3: {e}")
@@ -143,7 +149,7 @@ def load_json_to_postgres():
     conn.commit()
     cursor.close()
     conn.close()
-    print("Data loaded into PostgreSQL.")
+    print("Data loaded into PostgreSQL successfully.")
 
     # Optionally, delete the temporary file after use
     os.remove(local_file_path)
