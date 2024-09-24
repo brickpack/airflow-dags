@@ -22,7 +22,7 @@ api_host = "jsearch.p.rapidapi.com"
 query = "database engineer in united states"
 page = "1"
 num_pages = "10"
-date_posted = "week"
+date_posted = "month"
 remote_jobs_only = "true"
 employment_types = "FULLTIME"
 
