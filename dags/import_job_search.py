@@ -125,7 +125,13 @@ def transform_data(**context):
     from datetime import datetime
     from urllib.parse import urlparse
 
-    raw_data = context['ti'].xcom_pull(key='raw_data', task_ids='extract_data_task')
+    logging.info("Pulling raw_data from XCom")
+    raw_data = context['ti'].xcom_pull(key='raw_data', task_ids='extract_data')
+    if raw_data is None:
+        logging.error("No data received from extract_data task")
+        raise ValueError("No data received from extract_data task")
+    logging.info("raw_data successfully retrieved from XCom")
+
     transformed_data = {}
     
     # Helper functions
@@ -390,112 +396,6 @@ def load_data(**context):
     finally:
         cursor.close()
         conn.close()
-
-# def load_json_to_postgres():
-#     """Load the JSON data from S3 and insert it into PostgreSQL."""
-#     # Download the JSON file from S3 into the manually defined file path
-#     s3_file_key = "job_search/job_search_response.json"
-#     local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
-
-#     # Ensure the file exists after downloading
-#     if not os.path.exists(local_file_path):
-#         raise FileNotFoundError(f"File {local_file_path} was not downloaded from S3.")
-    
-#     # Read the JSON file and insert it into PostgreSQL
-#     with open(local_file_path, 'r') as file:
-#         data = json.load(file)
-
-#     pg_hook = PostgresHook(postgres_conn_id=postgres_airflow_conn)
-#     conn = pg_hook.get_conn()
-#     cursor = conn.cursor()
-
-#     create_table_sql = """
-#     CREATE TABLE IF NOT EXISTS job_search (
-#         id SERIAL PRIMARY KEY,
-#         job_id VARCHAR(255),
-#         employer_name VARCHAR(255),
-#         employer_logo TEXT,
-#         employer_website VARCHAR(255),
-#         employer_company_type VARCHAR(100),
-#         employer_linkedin VARCHAR(255),
-#         job_publisher VARCHAR(100),
-#         job_employment_type VARCHAR(50),
-#         job_title VARCHAR(255),
-#         job_apply_link TEXT,
-#         job_apply_is_direct BOOLEAN,
-#         job_apply_quality_score FLOAT,
-#         job_description TEXT,
-#         job_is_remote BOOLEAN,
-#         job_posted_at_timestamp BIGINT,
-#         job_posted_at_datetime_utc TIMESTAMP,
-#         job_city VARCHAR(100),
-#         job_state VARCHAR(100),
-#         job_country VARCHAR(10),
-#         job_latitude FLOAT,
-#         job_longitude FLOAT,
-#         job_benefits TEXT,
-#         job_google_link TEXT,
-#         job_offer_expiration_datetime_utc TIMESTAMP,
-#         job_offer_expiration_timestamp BIGINT,
-#         job_required_experience_no_experience_required BOOLEAN,
-#         job_required_experience_required_in_months INT,
-#         job_required_experience_experience_mentioned BOOLEAN,
-#         job_required_experience_experience_preferred BOOLEAN,
-#         job_required_skills TEXT,
-#         job_required_education_postgraduate_degree BOOLEAN,
-#         job_required_education_professional_certification BOOLEAN,
-#         job_required_education_high_school BOOLEAN,
-#         job_required_education_associates_degree BOOLEAN,
-#         job_required_education_bachelors_degree BOOLEAN,
-#         job_required_education_degree_mentioned BOOLEAN,
-#         job_required_education_degree_preferred BOOLEAN,
-#         job_required_education_professional_certification_mentioned BOOLEAN,
-#         job_experience_in_place_of_education BOOLEAN,
-#         job_min_salary DECIMAL(10,2),
-#         job_max_salary DECIMAL(10,2),
-#         job_salary_currency VARCHAR(10),
-#         job_salary_period VARCHAR(50),
-#         job_highlights TEXT,
-#         job_job_title VARCHAR(255),
-#         job_posting_language VARCHAR(10),
-#         job_onet_soc VARCHAR(20),
-#         job_onet_job_zone VARCHAR(20),
-#         job_occupational_categories TEXT,
-#         job_naics_code VARCHAR(20),
-#         job_naics_name VARCHAR(255)
-#     );
-    
-#     CREATE TABLE IF NOT EXSISTS apply_options (
-#         job_id VARCHAR(255),
-#         publisher VARCHAR(100),
-#         apply_link TEXT,
-#         is_direct BOOLEAN,
-#         FOREIGN KEY (job_id) REFERENCES job_search_responses(job_id)
-#     );
-#     """
-#     cursor.execute(create_table_sql)
-
-#     # Insert data into PostgreSQL
-#     for job in data['data']: 
-#         insert_sql = """
-#         INSERT INTO job_search_responses (job_title, company, location, description, date_posted)
-#         VALUES (%s, %s, %s, %s, %s);
-#         """
-#         cursor.execute(insert_sql, (
-#             job['job_title'],
-#             job['employer_name'],
-#             f"{job['job_city']}, {job['job_state']}, {job['job_country']}",
-#             job['job_description'],
-#             job['job_posted_at_datetime_utc']
-#         ))
-
-#     conn.commit()
-#     cursor.close()
-#     conn.close()
-#     print("Data loaded into PostgreSQL successfully.")
-
-#     # Optionally, delete the temporary file after use
-#     os.remove(local_file_path)
 
 default_args = {
     'owner': 'airflow',
