@@ -133,17 +133,18 @@ def load_json_to_postgres():
     """
     cursor.execute(create_table_sql)
 
-    for job in data['jobs']:
+    # Insert data into PostgreSQL
+    for job in data['data']:
         insert_sql = """
         INSERT INTO job_search_responses (job_title, company, location, description, date_posted)
         VALUES (%s, %s, %s, %s, %s);
         """
         cursor.execute(insert_sql, (
-            job['title'],
-            job['company'],
-            job['location'],
-            job['description'],
-            job['date_posted']
+            job['job_title'],
+            job['employer_name'],
+            f"{job['job_city']}, {job['job_state']}, {job['job_country']}",
+            job['job_description'],
+            job['job_posted_at_datetime_utc']
         ))
 
     conn.commit()
