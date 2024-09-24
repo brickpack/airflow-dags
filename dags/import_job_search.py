@@ -411,7 +411,8 @@ def load_data(**context):
             job_onet_job_zone VARCHAR(20),
             job_occupational_categories TEXT,
             job_naics_code VARCHAR(20),
-            job_naics_name VARCHAR(255)
+            job_naics_name VARCHAR(255),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """
         cursor.execute(create_job_search_table_sql)
@@ -461,7 +462,7 @@ def load_data(**context):
                 'job_max_salary', 'job_salary_currency', 'job_salary_period',
                 'job_highlights', 'job_job_title', 'job_posting_language',
                 'job_onet_soc', 'job_onet_job_zone', 'job_occupational_categories',
-                'job_naics_code', 'job_naics_name'
+                'job_naics_code', 'job_naics_name', 'updated_at'
             ]
             update_set = ', '.join([f"{col}=EXCLUDED.{col}" for col in update_columns])
 
