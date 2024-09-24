@@ -76,13 +76,17 @@ def call_job_search_api():
 def download_from_s3(bucket, object_name, file_name):
     """Download a file from an S3 bucket using Airflow's S3Hook."""
     s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
+    
     try:
         # Ensure the directory exists before writing the file
         os.makedirs(os.path.dirname(file_name), exist_ok=True)
-
+        
         # Download the file from S3
-        s3_hook.download_file(key=object_name, bucket_name=bucket, local_path=file_name)
-        print(f"File {file_name} downloaded from s3://{bucket}/{object_name}")
+        if not os.path.isdir(file_name):  # Make sure file_name is not a directory
+            s3_hook.download_file(key=object_name, bucket_name=bucket, local_path=file_name)
+            print(f"File {file_name} downloaded from s3://{bucket}/{object_name}")
+        else:
+            raise ValueError(f"The specified local path '{file_name}' is a directory, not a file.")
     except Exception as e:
         print(f"Failed to download {object_name} from S3: {e}")
         raise
@@ -90,10 +94,14 @@ def download_from_s3(bucket, object_name, file_name):
 def load_json_to_postgres():
     """Load the JSON data from S3 and insert it into PostgreSQL."""
     # Download the JSON file from S3
-    local_file_path = "/opt/airflow/tmp/job_search_response.json"  # Updated path
+    local_file_path = "/opt/airflow/tmp/job_search_response.json"  # Ensure this is a file path
     s3_file_key = "job_search/job_search_response.json"
     download_from_s3(bucket, s3_file_key, local_file_path)
 
+    # Ensure the file exists after downloading
+    if not os.path.exists(local_file_path):
+        raise FileNotFoundError(f"File {local_file_path} was not downloaded from S3.")
+    
     # Read the JSON file and insert it into PostgreSQL
     with open(local_file_path, 'r') as file:
         data = json.load(file)
