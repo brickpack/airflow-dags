@@ -78,6 +78,12 @@ def download_from_s3(bucket, object_name):
     """Download a file from an S3 bucket using Airflow's S3Hook and NamedTemporaryFile."""
     s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
     
+    # Ensure the directory exists and is writable
+    tmp_dir = "/opt/airflow/tmp"
+    if not os.path.exists(tmp_dir):
+        os.makedirs(tmp_dir, exist_ok=True)  # Create the directory if it doesn't exist
+        print(f"Directory {tmp_dir} created.")
+        
     try:
         # Use NamedTemporaryFile to create a secure temporary file
         with tempfile.NamedTemporaryFile(delete=False, dir="/opt/airflow/tmp") as tmp_file:
