@@ -366,7 +366,7 @@ def load_data(**context):
             publisher VARCHAR(100),
             apply_link TEXT,
             is_direct BOOLEAN,
-            FOREIGN KEY (id) REFERENCES job_search_responses(id)
+            FOREIGN KEY (id) REFERENCES job_search(id)
         );
         """
         cursor.execute(create_table_sql)
