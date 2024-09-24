@@ -366,7 +366,7 @@ def load_data(**context):
             job_onet_job_zone VARCHAR(20),
             job_occupational_categories TEXT,
             job_naics_code VARCHAR(20),
-            job_naics_name VARCHAR(255),
+            job_naics_name VARCHAR(255)
         );
         """
         cursor.execute(create_job_search_table_sql)
