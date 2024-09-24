@@ -14,17 +14,30 @@ import os
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-airflow_api_conn_id = 'rapidapi_jsearch'
+# API
+airflow_api_conn = 'rapidapi_jsearch'
 api_url = "https://jsearch.p.rapidapi.com/search"
-rapidapi_host = "jsearch.p.rapidapi.com"
-postgres_airflow_conn = 'pg_etl'
+api_host = "jsearch.p.rapidapi.com"
+# querystring Params
+query = "database engineer in united states"
+page = "1"
+num_pages = "10"
+date_posted = "week"
+remote_jobs_only = "true"
+employment_types = "FULLTIME"
+
+# S3
 bucket = 'birkbeck-job-search'
+
+# DB
+airflow_pg_conn = 'pg_etl'
+
 
 
 def get_rapidapi_key():
     """Fetch the RapidAPI key from the Airflow connection."""
     try:
-        connection = BaseHook.get_connection(airflow_api_conn_id)
+        connection = BaseHook.get_connection(airflow_api_conn)
         return connection.extra_dejson.get('headers').get('x-rapidapi-key')
     except Exception as e:
         logger.error("Failed to get RapidAPI key: %s", e)
@@ -46,15 +59,15 @@ def call_job_search_api():
         url = api_url
         headers = {
             "x-rapidapi-key": get_rapidapi_key(),
-            "x-rapidapi-host": rapidapi_host
+            "x-rapidapi-host": api_host
         }
         querystring = {
-            "query": "database engineer in united states",
-            "page": "1",
-            "num_pages": "10",
-            "date_posted": "today",
-            "remote_jobs_only": "true",
-            "employment_types": "FULLTIME",
+            "query": query,
+            "page": page,
+            "num_pages": num_pages,
+            "date_posted": date_posted,
+            "remote_jobs_only": remote_jobs_only,
+            "employment_types": employment_types,
         }
         response = requests.get(url, headers=headers, params=querystring)
         response.raise_for_status()
@@ -340,10 +353,11 @@ def load_data(**context):
     transformed_apply_options_list = context['ti'].xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
 
     try:
-        pg_hook = PostgresHook(postgres_conn_id=postgres_airflow_conn)
+        pg_hook = PostgresHook(postgres_conn_id=airflow_pg_conn)
         conn = pg_hook.get_conn()
         cursor = conn.cursor()
 
+        # Create job_search table if it doesn't exist
         create_job_search_table_sql = """
         CREATE TABLE IF NOT EXISTS job_search (
             id SERIAL,
@@ -402,6 +416,7 @@ def load_data(**context):
         """
         cursor.execute(create_job_search_table_sql)
 
+        # Create apply_options table if it doesn't exist
         create_apply_options_table_sql = """
         CREATE TABLE IF NOT EXISTS apply_options (
             job_id VARCHAR(255),
@@ -414,20 +429,52 @@ def load_data(**context):
         """
         cursor.execute(create_apply_options_table_sql)
 
-        # Insert into 'job_search' table
+        # Insert or Upsert into 'job_search' table
         if transformed_data_list:
             job_columns = transformed_data_list[0].keys()
             job_columns_str = ', '.join(job_columns)
             job_placeholders = ', '.join(['%s'] * len(job_columns))
+            
+            # Define the columns to update on conflict
+            update_columns = [
+                'employer_name', 'employer_logo', 'employer_website',
+                'employer_company_type', 'employer_linkedin', 'job_publisher',
+                'job_employment_type', 'job_title', 'job_apply_link',
+                'job_apply_is_direct', 'job_apply_quality_score', 'job_description',
+                'job_is_remote', 'job_posted_at_timestamp', 'job_posted_at_datetime_utc',
+                'job_city', 'job_state', 'job_country', 'job_latitude',
+                'job_longitude', 'job_benefits', 'job_google_link',
+                'job_offer_expiration_datetime_utc', 'job_offer_expiration_timestamp',
+                'job_required_experience_no_experience_required',
+                'job_required_experience_required_in_months',
+                'job_required_experience_experience_mentioned',
+                'job_required_experience_experience_preferred',
+                'job_required_skills', 'job_required_education_postgraduate_degree',
+                'job_required_education_professional_certification',
+                'job_required_education_high_school',
+                'job_required_education_associates_degree',
+                'job_required_education_bachelors_degree',
+                'job_required_education_degree_mentioned',
+                'job_required_education_degree_preferred',
+                'job_required_education_professional_certification_mentioned',
+                'job_experience_in_place_of_education', 'job_min_salary',
+                'job_max_salary', 'job_salary_currency', 'job_salary_period',
+                'job_highlights', 'job_job_title', 'job_posting_language',
+                'job_onet_soc', 'job_onet_job_zone', 'job_occupational_categories',
+                'job_naics_code', 'job_naics_name'
+            ]
+            update_set = ', '.join([f"{col}=EXCLUDED.{col}" for col in update_columns])
+
             job_insert_query = f"""
                 INSERT INTO job_search ({job_columns_str})
                 VALUES ({job_placeholders})
-                ON CONFLICT (job_id) DO NOTHING
+                ON CONFLICT (job_id) DO UPDATE SET
+                {update_set}
             """
             job_values = [tuple(job[col] for col in job_columns) for job in transformed_data_list]
             cursor.executemany(job_insert_query, job_values)
 
-        # Insert into 'apply_options' table
+        # Insert or Upsert into 'apply_options' table
         if transformed_apply_options_list:
             apply_columns = transformed_apply_options_list[0].keys()
             apply_columns_str = ', '.join(apply_columns)
