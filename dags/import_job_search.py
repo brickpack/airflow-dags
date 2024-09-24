@@ -104,15 +104,6 @@ def download_from_s3(bucket, object_name):
         raise
 
 def extract_data(**context):
-    # Read JSON data from a file
-    s3_file_key = "job_search/job_search_response.json"
-    local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
-
-    with open(local_file_path, 'r') as file:
-        data = json.load(file)
-    context['ti'].xcom_push(key='raw_data', value=data)
-
-def extract_data(**context):
     import json
     # Read JSON data from a file
     s3_file_key = "job_search/job_search_response.json"
