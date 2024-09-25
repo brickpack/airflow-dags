@@ -30,7 +30,7 @@ employment_types = "FULLTIME"
 bucket = 'birkbeck-job-search'
 
 # DB
-airflow_pg_conn = 'pg_etl'
+airflow_pg_conn = 'pg_jobs'
 
 
 
