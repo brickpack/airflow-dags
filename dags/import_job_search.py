@@ -519,7 +519,7 @@ dag = DAG(
     'import_job_search',
     default_args=default_args,
     description='A DAG to call job search API, export JSON to S3, then import job_search_response.json from S3 into PostgreSQL',
-    schedule_interval=timedelta(days=1),
+    schedule_interval=timedelta(hours=1),
 )
 
 call_api = PythonOperator(
