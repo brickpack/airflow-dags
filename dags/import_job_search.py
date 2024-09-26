@@ -507,7 +507,7 @@ def load_data(**context):
 
 default_args = {
     'owner': 'airflow',
-    'schedule_interval': "3 1-13 * * *",  # Run at 5 minutes past every hour from hours 1 through 13
+    'schedule_interval': "15 12-23 * * *",  # Run at 15 minutes past every hour from hours 12 through 23
     'start_date': datetime(2024, 9, 24),
     'email_on_failure': True,
     'email_on_retry': False,
