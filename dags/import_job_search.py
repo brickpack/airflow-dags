@@ -509,6 +509,7 @@ default_args = {
     'owner': 'airflow',
     'schedule_interval': "15 12-23 * * *",  # Run at 15 minutes past every hour from hours 12 through 23
     'start_date': datetime(2024, 9, 24),
+    'email': 'dave.birkbeck@gmail.com',
     'email_on_failure': True,
     'email_on_retry': False,
     'retries': 1,
