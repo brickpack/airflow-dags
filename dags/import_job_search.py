@@ -330,7 +330,7 @@ def transform_data(**context):
         for option in apply_options:
             option_data = {
                 'job_id': transformed_data['job_id'],
-                'publisher': option.get('publisher', '').strip(),
+                'publisher': clean_job_field(option.get('publisher')),
                 'apply_link': option.get('apply_link'),
                 'is_direct': parse_boolean(option.get('is_direct'))
             }
