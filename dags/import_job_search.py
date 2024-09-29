@@ -518,6 +518,7 @@ default_args = {
 
 dag = DAG(
     'import_job_search',
+    catchup=False,
     default_args=default_args,
     description='A DAG to call job search API, export JSON to S3, then import job_search_response.json from S3 into PostgreSQL',
     schedule_interval=timedelta(hours=1),
