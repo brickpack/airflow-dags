@@ -507,7 +507,7 @@ def load_data(**context):
 
 default_args = {
     'owner': 'airflow',
-    'schedule_interval': '28 12-23 * * *',  # Run at 28 minutes past every hour from hours 12 through 23
+    'schedule_interval': '30 12-23 * * *',  # Run at 28 minutes past every hour from hours 12 through 23
     'start_date': datetime(2024, 9, 26),
     'email': 'dave.birkbeck@gmail.com',
     'email_on_failure': True,
@@ -520,8 +520,8 @@ dag = DAG(
     'import_job_search',
     catchup=False,
     default_args=default_args,
-    description='A DAG to call job search API, export JSON to S3, then import job_search_response.json from S3 into PostgreSQL',
-    schedule_interval=timedelta(hours=1),
+    description='A DAG to call job search API, export JSON to S3, then import job_search_response.json from S3 into PostgreSQL'
+    # schedule_interval=timedelta(hours=1),
 )
 
 call_api = PythonOperator(
