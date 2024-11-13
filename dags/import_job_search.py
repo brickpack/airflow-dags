@@ -523,7 +523,7 @@ def load_data(**context):
         conn.close()
 
 
-def load_to_snowflake(**kwargs):
+def load_to_snowflake(**context):
     import snowflake.connector
     conn = None
     cursor = None
