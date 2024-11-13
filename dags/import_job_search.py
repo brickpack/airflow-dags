@@ -522,8 +522,11 @@ def load_data(**context):
         cursor.close()
         conn.close()
 
-def load_to_snowflake(**context):
+
+def load_to_snowflake(**kwargs):
     import snowflake.connector
+    conn = None
+    cursor = None
 
     logging.info("Starting upload_to_snowflake task")
 
@@ -531,13 +534,14 @@ def load_to_snowflake(**context):
     transformed_apply_options_list = context['ti'].xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
 
     try:
+        conn_params = get_snowflake_conn()
         conn = snowflake.connector.connect(
-            user='your_username',
-            password='your_password',
-            account='your_account',
-            warehouse='your_warehouse',
-            database='your_database',
-            schema='your_schema'
+            user=conn_params['user'],
+            password=conn_params['password'],
+            account=conn_params['account'],
+            warehouse=conn_params['warehouse'],
+            database=conn_params['database'],
+            schema=conn_params['schema']
         )
         cursor = conn.cursor()
 
