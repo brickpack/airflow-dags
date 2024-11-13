@@ -4,6 +4,7 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.operators.python_operator import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+import snowflake.connector
 from datetime import datetime, timedelta
 import requests
 import logging
@@ -32,9 +33,6 @@ bucket = 'birkbeck-job-search'
 # DB
 airflow_pg_conn = 'pg_jobs'
 
-# Snowflake
-snowflake_conn = 'snowflake_jobs'
-
 
 def get_rapidapi_key():
     """Fetch the RapidAPI key from the Airflow connection."""
@@ -48,15 +46,15 @@ def get_rapidapi_key():
 def get_snowflake_conn():
     """Fetch the Snowflake connection details from the Airflow connection."""
     try:
-        connection = BaseHook.get_connection('snowflake_conn')
-        return {
-            'user': connection.login,
-            'password': connection.password,
-            'account': connection.host,
-            'warehouse': connection.extra_dejson.get('warehouse'),
-            'database': connection.schema,
-            'schema': connection.extra_dejson.get('schema')
-        }
+        conn = BaseHook.get_connection('snowflake_conn')
+        return snowflake.connector.connect(
+            user=conn.login,
+            password=conn.password,
+            account=conn.host,
+            warehouse=conn.extra_dejson.get('warehouse'),
+            database=conn.schema,
+            schema=conn.extra_dejson.get('schema')
+        )
     except Exception as e:
         logger.error("Failed to get Snowflake connection details: %s", e)
         raise
@@ -525,24 +523,16 @@ def load_data(**context):
 
 def load_to_snowflake(**context):
     import snowflake.connector
-    conn = None
-    cursor = None
-
-    logging.info("Starting upload_to_snowflake task")
 
     transformed_data_list = context['ti'].xcom_pull(key='transformed_data_list', task_ids='transform_data')
     transformed_apply_options_list = context['ti'].xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
 
+    logging.info("Starting upload_to_snowflake task")
+
+    conn = None
+    cursor = None
     try:
-        conn_params = get_snowflake_conn()
-        conn = snowflake.connector.connect(
-            user=conn_params['user'],
-            password=conn_params['password'],
-            account=conn_params['account'],
-            warehouse=conn_params['warehouse'],
-            database=conn_params['database'],
-            schema=conn_params['schema']
-        )
+        conn = get_snowflake_conn()
         cursor = conn.cursor()
 
         # Create job_search table if it doesn't exist
