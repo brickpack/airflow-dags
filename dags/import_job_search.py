@@ -32,6 +32,8 @@ bucket = 'birkbeck-job-search'
 # DB
 airflow_pg_conn = 'pg_jobs'
 
+# Snowflake
+snowflake_conn = 'snowflake_jobs'
 
 
 def get_rapidapi_key():
@@ -41,6 +43,22 @@ def get_rapidapi_key():
         return connection.extra_dejson.get('headers').get('x-rapidapi-key')
     except Exception as e:
         logger.error("Failed to get RapidAPI key: %s", e)
+        raise
+
+def get_snowflake_conn():
+    """Fetch the Snowflake connection details from the Airflow connection."""
+    try:
+        connection = BaseHook.get_connection('snowflake_conn')
+        return {
+            'user': connection.login,
+            'password': connection.password,
+            'account': connection.host,
+            'warehouse': connection.extra_dejson.get('warehouse'),
+            'database': connection.schema,
+            'schema': connection.extra_dejson.get('schema')
+        }
+    except Exception as e:
+        logger.error("Failed to get Snowflake connection details: %s", e)
         raise
 
 def upload_to_s3(file_name, bucket, object_name=None):
@@ -123,7 +141,8 @@ def download_from_s3(bucket, object_name):
 def extract_data(**context):
     import json
     # Read JSON data from a file
-    s3_file_key = "job_search/job_search_response.json"
+    date_partition = datetime.now().strftime('%Y/%m/%d')
+    s3_file_key = f"{date_partition}/job_search/job_search_response.json"
     local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
     print(f"File downloaded from s3://{bucket}/{s3_file_key} and written to variable local_file_path: {local_file_path}")
 
@@ -137,14 +156,11 @@ def extract_data(**context):
         print(f"Error in extract_data: {e}")
         raise e
 
-
 def transform_data(**context):
     import json
     import logging
     from datetime import datetime
     from urllib.parse import urlparse
-
-    
 
     logging.info("Pulling raw_data from XCom")
     raw_data = context['ti'].xcom_pull(key='raw_data', task_ids='extract_data')
@@ -182,7 +198,6 @@ def transform_data(**context):
         
     def clean_job_field(value):
         return (value or '').strip()
-
 
     # List to store all transformed jobs
     transformed_jobs = []
@@ -347,7 +362,6 @@ def transform_data(**context):
     context['ti'].xcom_push(key='transformed_data_list', value=transformed_jobs)
     context['ti'].xcom_push(key='transformed_apply_options_list', value=transformed_apply_options_list)
 
-
 def load_data(**context):
     import logging
 
@@ -503,6 +517,172 @@ def load_data(**context):
     except Exception as e:
         conn.rollback()
         logging.error(f"Error in load_data: {e}")
+        raise e
+    finally:
+        cursor.close()
+        conn.close()
+
+def load_to_snowflake(**context):
+    import snowflake.connector
+
+    logging.info("Starting upload_to_snowflake task")
+
+    transformed_data_list = context['ti'].xcom_pull(key='transformed_data_list', task_ids='transform_data')
+    transformed_apply_options_list = context['ti'].xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
+
+    try:
+        conn = snowflake.connector.connect(
+            user='your_username',
+            password='your_password',
+            account='your_account',
+            warehouse='your_warehouse',
+            database='your_database',
+            schema='your_schema'
+        )
+        cursor = conn.cursor()
+
+        # Create job_search table if it doesn't exist
+        create_job_search_table_sql = """
+        CREATE TABLE IF NOT EXISTS job_search (
+            id INTEGER AUTOINCREMENT,
+            job_id STRING PRIMARY KEY,
+            employer_name STRING,
+            employer_logo STRING,
+            employer_website STRING,
+            employer_company_type STRING,
+            employer_linkedin STRING,
+            job_publisher STRING,
+            job_employment_type STRING,
+            job_title STRING,
+            job_apply_link STRING,
+            job_apply_is_direct BOOLEAN,
+            job_apply_quality_score FLOAT,
+            job_description STRING,
+            job_is_remote BOOLEAN,
+            job_posted_at_timestamp BIGINT,
+            job_posted_at_datetime_utc TIMESTAMP,
+            job_city STRING,
+            job_state STRING,
+            job_country STRING,
+            job_latitude FLOAT,
+            job_longitude FLOAT,
+            job_benefits STRING,
+            job_google_link STRING,
+            job_offer_expiration_datetime_utc TIMESTAMP,
+            job_offer_expiration_timestamp BIGINT,
+            job_required_experience_no_experience_required BOOLEAN,
+            job_required_experience_required_in_months INTEGER,
+            job_required_experience_experience_mentioned BOOLEAN,
+            job_required_experience_experience_preferred BOOLEAN,
+            job_required_skills STRING,
+            job_required_education_postgraduate_degree BOOLEAN,
+            job_required_education_professional_certification BOOLEAN,
+            job_required_education_high_school BOOLEAN,
+            job_required_education_associates_degree BOOLEAN,
+            job_required_education_bachelors_degree BOOLEAN,
+            job_required_education_degree_mentioned BOOLEAN,
+            job_required_education_degree_preferred BOOLEAN,
+            job_required_education_professional_certification_mentioned BOOLEAN,
+            job_experience_in_place_of_education BOOLEAN,
+            job_min_salary FLOAT,
+            job_max_salary FLOAT,
+            job_salary_currency STRING,
+            job_salary_period STRING,
+            job_highlights STRING,
+            job_job_title STRING,
+            job_posting_language STRING,
+            job_onet_soc STRING,
+            job_onet_job_zone STRING,
+            job_occupational_categories STRING,
+            job_naics_code STRING,
+            job_naics_name STRING,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        cursor.execute(create_job_search_table_sql)
+
+        # Create apply_options table if it doesn't exist
+        create_apply_options_table_sql = """
+        CREATE TABLE IF NOT EXISTS apply_options (
+            job_id STRING,
+            publisher STRING,
+            apply_link STRING,
+            is_direct BOOLEAN,
+            PRIMARY KEY (job_id, publisher),
+            FOREIGN KEY (job_id) REFERENCES job_search(job_id)
+        );
+        """
+        cursor.execute(create_apply_options_table_sql)
+
+        # Insert or Upsert into 'job_search' table
+        if transformed_data_list:
+            job_columns = transformed_data_list[0].keys()
+            job_columns_str = ', '.join(job_columns)
+            job_placeholders = ', '.join(['%s'] * len(job_columns))
+            
+            # Define the columns to update on conflict
+            update_columns = [
+                'employer_name', 'employer_logo', 'employer_website',
+                'employer_company_type', 'employer_linkedin', 'job_publisher',
+                'job_employment_type', 'job_title', 'job_apply_link',
+                'job_apply_is_direct', 'job_apply_quality_score', 'job_description',
+                'job_is_remote', 'job_posted_at_timestamp', 'job_posted_at_datetime_utc',
+                'job_city', 'job_state', 'job_country', 'job_latitude',
+                'job_longitude', 'job_benefits', 'job_google_link',
+                'job_offer_expiration_datetime_utc', 'job_offer_expiration_timestamp',
+                'job_required_experience_no_experience_required',
+                'job_required_experience_required_in_months',
+                'job_required_experience_experience_mentioned',
+                'job_required_experience_experience_preferred',
+                'job_required_skills', 'job_required_education_postgraduate_degree',
+                'job_required_education_professional_certification',
+                'job_required_education_high_school',
+                'job_required_education_associates_degree',
+                'job_required_education_bachelors_degree',
+                'job_required_education_degree_mentioned',
+                'job_required_education_degree_preferred',
+                'job_required_education_professional_certification_mentioned',
+                'job_experience_in_place_of_education', 'job_min_salary',
+                'job_max_salary', 'job_salary_currency', 'job_salary_period',
+                'job_highlights', 'job_job_title', 'job_posting_language',
+                'job_onet_soc', 'job_onet_job_zone', 'job_occupational_categories',
+                'job_naics_code', 'job_naics_name', 'updated_at'
+            ]
+            update_set = ', '.join([f"{col}=EXCLUDED.{col}" for col in update_columns])
+
+            job_insert_query = f"""
+                INSERT INTO job_search ({job_columns_str})
+                VALUES ({job_placeholders})
+                ON CONFLICT (job_id) DO UPDATE SET
+                {update_set}
+            """
+            job_values = [tuple(job[col] for col in job_columns) for job in transformed_data_list]
+            cursor.executemany(job_insert_query, job_values)
+
+        # Insert or Upsert into 'apply_options' table
+        if transformed_apply_options_list:
+            apply_columns = transformed_apply_options_list[0].keys()
+            apply_columns_str = ', '.join(apply_columns)
+            apply_placeholders = ', '.join(['%s'] * len(apply_columns))
+
+            conflict_columns = ['job_id', 'publisher']
+            conflict_columns_str = ', '.join(conflict_columns)
+            update_columns = [col for col in apply_columns if col not in conflict_columns]
+
+            apply_insert_query = f"""
+                INSERT INTO apply_options ({apply_columns_str})
+                VALUES ({apply_placeholders})
+                ON CONFLICT ({conflict_columns_str}) DO UPDATE SET
+                {', '.join([f"{col}=EXCLUDED.{col}" for col in update_columns])}
+            """
+            apply_values = [tuple(option[col] for col in apply_columns) for option in transformed_apply_options_list]
+            cursor.executemany(apply_insert_query, apply_values)
+
+        conn.commit()
+        logging.info("Data loaded successfully into Snowflake")
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error in upload_to_snowflake: {e}")
         raise e
     finally:
         cursor.close()
