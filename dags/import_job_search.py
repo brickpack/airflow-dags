@@ -732,4 +732,11 @@ load = PythonOperator(
     provide_context=True
 )
 
-call_api >> extract >> transform >> load
+upload_to_snowflake = PythonOperator(
+    task_id='upload_to_snowflake',
+    python_callable=load_to_snowflake,
+    provide_context=True,
+    execution_timeout=timedelta(days=1)  # Ensure this task runs once a day
+)
+
+call_api >> extract >> transform >> load >> upload_to_snowflake
