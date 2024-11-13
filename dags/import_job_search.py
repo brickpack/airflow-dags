@@ -44,11 +44,15 @@ def get_rapidapi_key():
         raise
 
 def upload_to_s3(file_name, bucket, object_name=None):
-    """Upload a file to an S3 bucket using Airflow's S3Hook."""
+    """Upload a file to an S3 bucket using Airflow's S3Hook with partitioning by date."""
     s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
     try:
-        s3_hook.load_file(filename=file_name, key=object_name or file_name, bucket_name=bucket, replace=True)
-        print(f"File {file_name} uploaded to s3://{bucket}/{object_name or file_name}")
+        # Create a partitioned path based on the current date
+        date_partition = datetime.now().strftime('%Y/%m/%d')
+        partitioned_object_name = f"{date_partition}/{object_name or file_name}"
+        
+        s3_hook.load_file(filename=file_name, key=partitioned_object_name, bucket_name=bucket, replace=True)
+        print(f"File {file_name} uploaded to s3://{bucket}/{partitioned_object_name}")
     except Exception as e:
         print(f"Failed to upload {file_name} to S3: {e}")
         raise
