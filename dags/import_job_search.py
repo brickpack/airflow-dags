@@ -521,11 +521,14 @@ def load_data(**context):
         conn.close()
 
 
-def load_to_snowflake(**context):
-    import snowflake.connector
+def load_to_snowflake(**kwargs):
+    context = kwargs['ti']
 
-    transformed_data_list = context['ti'].xcom_pull(key='transformed_data_list', task_ids='transform_data')
-    transformed_apply_options_list = context['ti'].xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
+    # transformed_data_list = context['ti'].xcom_pull(key='transformed_data_list', task_ids='transform_data')
+    # transformed_apply_options_list = context['ti'].xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
+
+    transformed_data_list = context.xcom_pull(key='transformed_data_list', task_ids='transform_data')    
+    transformed_apply_options_list = context.xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
 
     logging.info("Starting upload_to_snowflake task")
 
@@ -675,12 +678,15 @@ def load_to_snowflake(**context):
         conn.commit()
         logging.info("Data loaded successfully into Snowflake")
     except Exception as e:
-        conn.rollback()
-        logging.error(f"Error in upload_to_snowflake: {e}")
+        if conn:
+            conn.rollback()
+        logger.error(f"Error loading data to Snowflake: {e}")
         raise e
     finally:
-        cursor.close()
-        conn.close()
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 default_args = {
