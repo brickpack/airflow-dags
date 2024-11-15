@@ -44,19 +44,33 @@ def get_rapidapi_key():
         raise
 
 def get_snowflake_conn():
-    """Fetch the Snowflake connection details from the Airflow connection."""
     try:
+        # Retrieve connection from Airflow
         conn = BaseHook.get_connection('snowflake_conn')
+        logger.info("Retrieved Snowflake connection details.")
+
+        # Extract extras
+        extras = conn.extra_dejson
+        account = extras.get("account")
+        region = extras.get("region")
+        full_account = f"{account}.{region}" if region else account
+
+        # Connect to Snowflake
         return snowflake.connector.connect(
             user=conn.login,
             password=conn.password,
-            account=conn.host,
-            warehouse=conn.extra_dejson.get('warehouse'),
-            database=conn.schema,
-            schema=conn.extra_dejson.get('schema')
+            account=full_account,
+            warehouse=extras.get("warehouse"),
+            database=extras.get("database"),
+            schema=extras.get("schema", "PUBLIC"),  # Default to PUBLIC schema if not set
+            role=extras.get("role"),
+            insecure_mode=extras.get("insecure_mode", False)  # Default to False
         )
+    except snowflake.connector.Error as snow_err:
+        logger.error(f"Snowflake connection error: {snow_err}")
+        raise
     except Exception as e:
-        logger.error("Failed to get Snowflake connection details: %s", e)
+        logger.error(f"Unexpected error occurred: {e}")
         raise
 
 def upload_to_s3(file_name, bucket, object_name=None):
@@ -523,9 +537,6 @@ def load_data(**context):
 
 def load_to_snowflake(**kwargs):
     context = kwargs['ti']
-
-    # transformed_data_list = context['ti'].xcom_pull(key='transformed_data_list', task_ids='transform_data')
-    # transformed_apply_options_list = context['ti'].xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
 
     transformed_data_list = context.xcom_pull(key='transformed_data_list', task_ids='transform_data')    
     transformed_apply_options_list = context.xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
