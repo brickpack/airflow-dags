@@ -550,7 +550,7 @@ def load_to_snowflake(**kwargs):
         cursor = conn.cursor()
 
         # USE DATABASE
-        use_database_sql = f"USE DATABASE {conn.database}"
+        use_database_sql = f"USE DATABASE {conn.database};"
         cursor.execute(use_database_sql)
 
         # Create job_search table if it doesn't exist
