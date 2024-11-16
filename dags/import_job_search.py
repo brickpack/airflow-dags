@@ -211,6 +211,9 @@ def transform_data(**context):
     def clean_job_field(value):
         # Convert value to string if it's not None, otherwise use an empty string
         return str(value).strip() if value is not None else ''
+    
+    def clean_string(value):
+        return str(value).replace("'", "''").strip() if value else ''
 
     # List to store all transformed jobs
     transformed_jobs = []
@@ -537,9 +540,13 @@ def load_data(**context):
 
 
 def load_to_snowflake(**kwargs):
+    """
+    Load transformed job data into Snowflake using MERGE for upserts.
+    """
     context = kwargs['ti']
 
-    transformed_data_list = context.xcom_pull(key='transformed_data_list', task_ids='transform_data')    
+    # Retrieve transformed data from XCom
+    transformed_data_list = context.xcom_pull(key='transformed_data_list', task_ids='transform_data')
     transformed_apply_options_list = context.xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
 
     logging.info("Starting upload_to_snowflake task")
@@ -550,11 +557,10 @@ def load_to_snowflake(**kwargs):
         conn = get_snowflake_conn()
         cursor = conn.cursor()
 
-        # USE DATABASE
-        use_database_sql = f"USE DATABASE {conn.database};"
-        cursor.execute(use_database_sql)
+        # Use the database
+        cursor.execute(f"USE DATABASE {conn.database};")
 
-        # Create job_search table if it doesn't exist
+        # Ensure job_search table exists
         create_job_search_table_sql = """
         CREATE TABLE IF NOT EXISTS job_search (
             id INTEGER AUTOINCREMENT,
@@ -614,7 +620,7 @@ def load_to_snowflake(**kwargs):
         """
         cursor.execute(create_job_search_table_sql)
 
-        # Create apply_options table if it doesn't exist
+        # Ensure apply_options table exists
         create_apply_options_table_sql = """
         CREATE TABLE IF NOT EXISTS apply_options (
             job_id STRING,
@@ -627,52 +633,86 @@ def load_to_snowflake(**kwargs):
         """
         cursor.execute(create_apply_options_table_sql)
 
-        # Use MERGE for upserts in 'job_search' table
+        # Function to safely format strings
+        def escape_string(value):
+            return value.replace("'", "''") if isinstance(value, str) else value
+
+        # Batch MERGE for job_search table
         if transformed_data_list:
             for job in transformed_data_list:
+                job_values = {key: escape_string(value) for key, value in job.items()}
                 merge_job_search_query = f"""
                 MERGE INTO job_search AS target
                 USING (
                     SELECT 
-                        '{job['job_id']}' AS job_id, 
-                        '{job.get('employer_name', '')}' AS employer_name,
-                        '{job.get('employer_logo', '')}' AS employer_logo,
-                        '{job.get('employer_website', '')}' AS employer_website,
-                        -- Add remaining fields here in the SELECT statement
-                        '{datetime.utcnow()}' AS updated_at
+                        '{job_values.get('job_id')}' AS job_id, 
+                        '{job_values.get('employer_name', '')}' AS employer_name,
+                        '{job_values.get('employer_logo', '')}' AS employer_logo,
+                        '{job_values.get('employer_website', '')}' AS employer_website,
+                        '{job_values.get('employer_company_type', '')}' AS employer_company_type,
+                        '{job_values.get('employer_linkedin', '')}' AS employer_linkedin,
+                        '{job_values.get('job_publisher', '')}' AS job_publisher,
+                        '{job_values.get('job_employment_type', '')}' AS job_employment_type,
+                        '{job_values.get('job_title', '')}' AS job_title,
+                        '{job_values.get('job_apply_link', '')}' AS job_apply_link,
+                        {job_values.get('job_apply_is_direct', 'NULL')} AS job_apply_is_direct,
+                        {job_values.get('job_apply_quality_score', 'NULL')} AS job_apply_quality_score,
+                        '{job_values.get('job_description', '')}' AS job_description,
+                        {job_values.get('job_is_remote', 'NULL')} AS job_is_remote,
+                        {job_values.get('job_posted_at_timestamp', 'NULL')} AS job_posted_at_timestamp,
+                        {job_values.get('job_posted_at_datetime_utc', 'NULL')} AS job_posted_at_datetime_utc,
+                        '{datetime.now(datetime.timezone.utc)}' AS updated_at
                 ) AS source
                 ON target.job_id = source.job_id
                 WHEN MATCHED THEN
                     UPDATE SET
                         employer_name = source.employer_name,
                         employer_logo = source.employer_logo,
-                        -- Add remaining update fields here
+                        employer_website = source.employer_website,
+                        employer_company_type = source.employer_company_type,
+                        employer_linkedin = source.employer_linkedin,
+                        job_publisher = source.job_publisher,
+                        job_employment_type = source.job_employment_type,
+                        job_title = source.job_title,
+                        job_apply_link = source.job_apply_link,
+                        job_apply_is_direct = source.job_apply_is_direct,
+                        job_apply_quality_score = source.job_apply_quality_score,
+                        job_description = source.job_description,
+                        job_is_remote = source.job_is_remote,
+                        job_posted_at_timestamp = source.job_posted_at_timestamp,
+                        job_posted_at_datetime_utc = source.job_posted_at_datetime_utc,
                         updated_at = source.updated_at
                 WHEN NOT MATCHED THEN
                     INSERT (
-                        job_id, employer_name, employer_logo, 
-                        -- Add remaining insert fields here
-                        updated_at
+                        job_id, employer_name, employer_logo, employer_website, 
+                        employer_company_type, employer_linkedin, job_publisher, 
+                        job_employment_type, job_title, job_apply_link, job_apply_is_direct, 
+                        job_apply_quality_score, job_description, job_is_remote, 
+                        job_posted_at_timestamp, job_posted_at_datetime_utc, updated_at
                     )
                     VALUES (
-                        source.job_id, source.employer_name, source.employer_logo,
-                        -- Add remaining values here
+                        source.job_id, source.employer_name, source.employer_logo, source.employer_website, 
+                        source.employer_company_type, source.employer_linkedin, source.job_publisher, 
+                        source.job_employment_type, source.job_title, source.job_apply_link, 
+                        source.job_apply_is_direct, source.job_apply_quality_score, source.job_description, 
+                        source.job_is_remote, source.job_posted_at_timestamp, source.job_posted_at_datetime_utc, 
                         source.updated_at
                     );
                 """
                 cursor.execute(merge_job_search_query)
 
-        # Use MERGE for upserts in 'apply_options' table
+        # Batch MERGE for apply_options table
         if transformed_apply_options_list:
             for option in transformed_apply_options_list:
+                option_values = {key: escape_string(value) for key, value in option.items()}
                 merge_apply_options_query = f"""
                 MERGE INTO apply_options AS target
                 USING (
                     SELECT 
-                        '{option['job_id']}' AS job_id,
-                        '{option['publisher']}' AS publisher,
-                        '{option['apply_link']}' AS apply_link,
-                        {option.get('is_direct', 'NULL')} AS is_direct
+                        '{option_values.get('job_id')}' AS job_id, 
+                        '{option_values.get('publisher', '')}' AS publisher, 
+                        '{option_values.get('apply_link', '')}' AS apply_link, 
+                        {option_values.get('is_direct', 'NULL')} AS is_direct
                 ) AS source
                 ON target.job_id = source.job_id AND target.publisher = source.publisher
                 WHEN MATCHED THEN
@@ -686,17 +726,19 @@ def load_to_snowflake(**kwargs):
                 cursor.execute(merge_apply_options_query)
 
         conn.commit()
-        logging.info("Data loaded successfully into Snowflake using MERGE logic")
+        logging.info("Data successfully uploaded to Snowflake.")
+
     except Exception as e:
         if conn:
             conn.rollback()
-        logger.error(f"Error loading data to Snowflake: {e}")
-        raise e
+        logging.error(f"Error in load_to_snowflake: {e}")
+        raise
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
+
 
 default_args = {
     'owner': 'airflow',
