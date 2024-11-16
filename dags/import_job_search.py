@@ -209,7 +209,8 @@ def transform_data(**context):
             return False
         
     def clean_job_field(value):
-        return (value or '').strip()
+        # Convert value to string if it's not None, otherwise use an empty string
+        return str(value).strip() if value is not None else ''
 
     # List to store all transformed jobs
     transformed_jobs = []
