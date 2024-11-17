@@ -270,6 +270,7 @@ def transform_data(**context):
                 job_offer_expiration_datetime_str, '%Y-%m-%dT%H:%M:%S.%fZ')
         else:
             transformed_data['job_offer_expiration_datetime_utc'] = None
+            
         transformed_data['job_offer_expiration_timestamp'] = parse_int(job.get('job_offer_expiration_timestamp'))
 
         # Flatten 'job_required_experience'
@@ -522,8 +523,12 @@ def load_to_snowflake(**context):
     """Load transformed job data into Snowflake."""
 
     # Retrieve transformed data from XCom
-    transformed_data_list = context.xcom_pull(key='transformed_data_list', task_ids='transform_data')
-    transformed_apply_options_list = context.xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
+    ti = context['ti']  # Task instance
+    transformed_data_list = ti.xcom_pull(key='transformed_data_list', task_ids='transform_data')
+    transformed_apply_options_list = ti.xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
+
+    if not transformed_data_list or not transformed_apply_options_list:
+        raise ValueError("Transformed data or apply options are missing from XCom")
 
     logging.info("Starting upload_to_snowflake task")
 
