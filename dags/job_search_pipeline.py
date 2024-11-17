@@ -677,7 +677,16 @@ def load_to_snowflake(**context):
                         source.updated_at
                     );
                 """
-                cursor.execute(merge_job_search_query)
+                # cursor.execute(merge_job_search_query)
+                try:
+                    cursor.execute(merge_job_search_query)
+                except snowflake.connector.errors.ProgrammingError as e:
+                    logger.error("Snowflake SQL error: %s", e)
+                    logger.error("Offending query: %s", merge_job_search_query)
+                    raise
+                except Exception as e:
+                    logger.error("Unexpected error: %s", e)
+                    raise
 
         # Batch MERGE for apply_options table
         if transformed_apply_options_list:
