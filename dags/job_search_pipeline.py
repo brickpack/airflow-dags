@@ -114,7 +114,7 @@ def download_from_s3(BUCKET, object_name):
 
     try:
         # Fetch the S3 object as bytes
-        s3_object = s3_hook.get_key(key=object_name, BUCKET_name=BUCKET)
+        s3_object = s3_hook.get_key(key=object_name, bucket_name=BUCKET)
         file_data = s3_object.get()['Body'].read()  # Read the S3 object content as bytes
         
         # Write the S3 object data to a local file
