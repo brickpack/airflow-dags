@@ -72,6 +72,7 @@ def upload_to_s3(file_path, bucket, object_name):
     try:
         s3_hook = S3Hook(aws_conn_id='aws_default')
         partitioned_path = f"{datetime.now().strftime('%Y/%m/%d')}/{object_name}"
+        logger.info("Uploading file to S3. Target path: s3://%s/%s", bucket, partitioned_path)
         s3_hook.load_file(filename=file_path, bucket_name=bucket, key=partitioned_path, replace=True)
         logger.info("File %s uploaded to s3://%s/%s", file_path, bucket, partitioned_path)
     except Exception as e:
@@ -81,13 +82,17 @@ def upload_to_s3(file_path, bucket, object_name):
 def download_from_s3(bucket, object_name):
     """Download a file from S3 to a temporary directory."""
     try:
+        logger.info("Attempting to download file from S3. Bucket: %s, Key: %s", bucket, object_name)
         s3_hook = S3Hook(aws_conn_id='aws_default')
         local_dir = "/opt/airflow/tmp"
-        os.makedirs(local_dir, exist_ok=True)
+        os.makedirs(local_dir, exist_ok=True)  # Ensure the directory exists
         local_path = os.path.join(local_dir, os.path.basename(object_name))
         s3_hook.download_file(bucket_name=bucket, key=object_name, local_path=local_path)
         logger.info("File downloaded from s3://%s/%s to %s", bucket, object_name, local_path)
         return local_path
+    except FileNotFoundError as fnf_error:
+        logger.error("File not found. Ensure the file exists in the bucket: %s, key: %s", bucket, object_name)
+        raise fnf_error
     except Exception as e:
         logger.error("Failed to download %s from S3: %s", object_name, e)
         raise
@@ -114,13 +119,17 @@ def call_job_search_api():
 def extract_data(**context):
     """Extract job data from S3 and push it to XCom."""
     try:
-        date_partition = datetime.now().strftime('%Y/%m/%d')
+        date_partition = datetime.now().strftime('%Y/%m/%d')  # Adjust to the file's actual partitioning
         object_name = f"{date_partition}/job_search_response.json"
+        logger.info("Constructed S3 object name: %s", object_name)
         local_path = download_from_s3(BUCKET_NAME, object_name)
 
         with open(local_path, 'r') as file:
             data = json.load(file)
         context['ti'].xcom_push(key='raw_data', value=data)
+    except FileNotFoundError:
+        logger.error("Extract data failed due to missing S3 file.")
+        raise
     except Exception as e:
         logger.error("Error in extract_data: %s", e)
         raise
