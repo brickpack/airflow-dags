@@ -79,24 +79,6 @@ def upload_to_s3(file_path, bucket, object_name):
         logger.error("Failed to upload %s to S3: %s", file_path, e)
         raise
 
-def download_from_s3(bucket, object_name):
-    """Download a file from S3 to a temporary directory."""
-    try:
-        logger.info("Attempting to download file from S3. Bucket: %s, Key: %s", bucket, object_name)
-        s3_hook = S3Hook(aws_conn_id='aws_default')
-        local_dir = "/opt/airflow/tmp"
-        os.makedirs(local_dir, exist_ok=True)  # Ensure the directory exists
-        local_path = os.path.join(local_dir, os.path.basename(object_name))
-        s3_hook.download_file(bucket_name=bucket, key=object_name, local_path=local_path)
-        logger.info("File downloaded from s3://%s/%s to %s", bucket, object_name, local_path)
-        return local_path
-    except FileNotFoundError as fnf_error:
-        logger.error("File not found. Ensure the file exists in the bucket: %s, key: %s", bucket, object_name)
-        raise fnf_error
-    except Exception as e:
-        logger.error("Failed to download %s from S3: %s", object_name, e)
-        raise
-
 def call_job_search_api():
     """Fetch job data from the RapidAPI and save it to S3."""
     try:
@@ -116,23 +98,53 @@ def call_job_search_api():
         logger.error("Failed to fetch job data: %s", e)
         raise
 
-def extract_data(**context):
-    """Extract job data from S3 and push it to XCom."""
-    try:
-        date_partition = datetime.now().strftime('%Y/%m/%d')  # Adjust to the file's actual partitioning
-        object_name = f"{date_partition}/job_search_response.json"
-        logger.info("Constructed S3 object name: %s", object_name)
-        local_path = download_from_s3(BUCKET_NAME, object_name)
+def download_from_s3(bucket, object_name):
+    """Download a file from an S3 bucket using Airflow's S3Hook and manually write it to a file."""
+    s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
 
-        with open(local_path, 'r') as file:
-            data = json.load(file)
-        context['ti'].xcom_push(key='raw_data', value=data)
-    except FileNotFoundError:
-        logger.error("Extract data failed due to missing S3 file.")
-        raise
+    # Manually define the file path
+    tmp_dir = "/opt/airflow/tmp"
+    file_name = "job_search_response.json"
+    local_file_path = os.path.join(tmp_dir, file_name)
+
+    # Ensure the directory exists
+    if not os.path.exists(tmp_dir):
+        os.makedirs(tmp_dir, exist_ok=True)  # Create the directory if it doesn't exist
+        print(f"Directory {tmp_dir} created.")
+
+    try:
+        # Fetch the S3 object as bytes
+        s3_object = s3_hook.get_key(key=object_name, bucket_name=bucket)
+        file_data = s3_object.get()['Body'].read()  # Read the S3 object content as bytes
+        
+        # Write the S3 object data to a local file
+        with open(local_file_path, "wb") as f:
+            f.write(file_data)
+            print(f"File downloaded from s3://{bucket}/{object_name} and written to {local_file_path}")
+        
+        return local_file_path  # Return the file path for further use
+
     except Exception as e:
-        logger.error("Error in extract_data: %s", e)
+        print(f"Failed to download {object_name} from S3: {e}")
         raise
+
+def extract_data(**context):
+    import json
+    # Read JSON data from a file
+    date_partition = datetime.now().strftime('%Y/%m/%d')
+    s3_file_key = f"{date_partition}/job_search/job_search_response.json"
+    local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
+    print(f"File downloaded from s3://{bucket}/{s3_file_key} and written to variable local_file_path: {local_file_path}")
+
+    try:
+        with open(local_file_path, 'r') as file:
+            data = json.load(file)
+        # Push data to XCom
+        context['ti'].xcom_push(key='raw_data', value=data)
+    except Exception as e:
+        # Log the error and re-raise
+        print(f"Error in extract_data: {e}")
+        raise e
 
 def transform_data(**context):
     """Transform the raw data into a structured format for loading."""
