@@ -639,7 +639,7 @@ def load_to_snowflake(**context):
                         {job_values.get('job_is_remote', 'NULL')} AS job_is_remote,
                         {job_values.get('job_posted_at_timestamp', 'NULL')} AS job_posted_at_timestamp,
                         {job_values.get('job_posted_at_datetime_utc', 'NULL')} AS job_posted_at_datetime_utc,
-                        {UPDATED_AT} AS updated_at
+                        '{UPDATED_AT}' AS updated_at
                 ) AS source
                 ON target.job_id = source.job_id
                 WHEN MATCHED THEN
