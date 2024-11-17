@@ -731,7 +731,7 @@ def load_to_snowflake(**context):
 default_args = {
     "owner": "airflow",
     "start_date": datetime(2024, 9, 26),
-    "retries": 1,
+    "retries": 0,
     "retry_delay": timedelta(minutes=1),
     "email_on_failure": True,
 }
