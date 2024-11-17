@@ -39,21 +39,16 @@ def get_rapidapi_key():
     """Fetch the RapidAPI key from Airflow connections."""
     try:
         connection = BaseHook.get_connection(AIRFLOW_API_CONN)
-        headers = connection.extra_dejson.get('headers')
-        if headers:
-            return headers.get('x-rapidapi-key')
-        else:
-            raise KeyError("The 'headers' key is missing in the connection's extra_dejson.")
+        return connection.extra_dejson.get('headers', {}).get('x-rapidapi-key')
     except Exception as e:
         logger.error("Failed to retrieve RapidAPI key: %s", e)
         raise
 
 def get_snowflake_conn():
-        required_keys = ["account", "warehouse", "database"]
-        missing_keys = [key for key in required_keys if not extras.get(key)]
-        if missing_keys:
-            raise ValueError(f"Missing required Snowflake connection details: {', '.join(missing_keys)}")
-
+    """Retrieve Snowflake connection details and establish a connection."""
+    try:
+        conn = BaseHook.get_connection('snowflake_conn')
+        extras = conn.extra_dejson
         account = extras.get("account")
         region = extras.get("region")
         full_account = f"{account}.{region}" if region else account
@@ -67,23 +62,19 @@ def get_snowflake_conn():
             schema=extras.get("schema", "PUBLIC"),
             role=extras.get("role"),
         )
-            database=extras.get("database"),
-            schema=extras.get("schema", "PUBLIC"),
-            role=extras.get("role"),
-        )
     except snowflake.connector.Error as err:
         logger.error("Snowflake connection error: %s", err)
+        raise
+    except Exception as e:
+        logger.error("Unexpected error during Snowflake connection: %s", e)
+        raise
+
 def upload_to_s3(file_path, BUCKET, object_name):
     """Upload a file to S3 with a partitioned path based on the current date."""
     try:
         s3_hook = S3Hook(aws_conn_id='aws_default')
-        partitioned_path = f"{UPDATED_AT.split(' ')[0].replace('-', '/')}/{object_name}"
+        partitioned_path = f"{datetime.now().strftime('%Y/%m/%d')}/{object_name}"
         logger.info("Uploading file to S3. Target path: s3://%s/%s", BUCKET, partitioned_path)
-        s3_hook.load_file(filename=file_path, bucket_name=BUCKET, key=partitioned_path, replace=True)
-        logger.info("File %s uploaded to s3://%s/%s", file_path, BUCKET, partitioned_path)
-    except Exception as e:
-        logger.error("Failed to upload %s to S3: %s", file_path, e)
-        raise
         s3_hook.load_file(filename=file_path, bucket_name=BUCKET, key=partitioned_path, replace=True)
         logger.info("File %s uploaded to s3://%s/%s", file_path, BUCKET, partitioned_path)
     except Exception as e:
@@ -132,8 +123,6 @@ def download_from_s3(BUCKET, object_name):
     try:
         # Fetch the S3 object as bytes
         s3_object = s3_hook.get_key(key=object_name, bucket_name=BUCKET)
-        if s3_object is None:
-            raise FileNotFoundError(f"The object {object_name} does not exist in bucket {BUCKET}")
         file_data = s3_object.get()['Body'].read()  # Read the S3 object content as bytes
         
         # Write the S3 object data to a local file
@@ -172,28 +161,28 @@ def transform_data(**context):
         logging.error("No data received from extract_data task")
         raise ValueError("No data received from extract_data task")
     logging.info("raw_data successfully retrieved from XCom")
+
+    # Helper functions
     def parse_boolean(value):
-        try:
+        if isinstance(value, str):
             return value.lower() == 'true'
-        except AttributeError:
-            return bool(value)
-            return value.lower() == 'true'
-        except AttributeError:
-            return bool(value)
+        return bool(value)
+
     def parse_float(value):
         try:
+            if value is None or value == '':
+                return None
             return float(value)
-        except (ValueError, TypeError):
-            return None
+        except (TypeError, ValueError):
             return None
 
     def parse_int(value):
         try:
             return int(value)
-        try:
-            return int(value)
-        except ValueError:
+        except (TypeError, ValueError):
             return None
+
+    def validate_url(url):
         try:
             result = urlparse(url)
             return all([result.scheme, result.netloc])
@@ -201,7 +190,8 @@ def transform_data(**context):
             return False
         
     def clean_job_field(value):
-        return str(value).strip() if value else ''
+        # Convert value to string if it's not None, otherwise use an empty string
+        return str(value).strip() if value is not None else ''
     
     def clean_string(value):
         return str(value).replace("'", "''").strip() if value else ''
@@ -623,7 +613,6 @@ def load_to_snowflake(**context):
 
         # Function to safely format strings
         def escape_string(value):
-            """Safely format strings by escaping single quotes."""
             return value.replace("'", "''") if isinstance(value, str) else value
 
         # Batch MERGE for job_search table
@@ -643,12 +632,12 @@ def load_to_snowflake(**context):
                         '{job_values.get('job_publisher', '')}' AS job_publisher,
                         '{job_values.get('job_employment_type', '')}' AS job_employment_type,
                         '{job_values.get('job_title', '')}' AS job_title,
-                        {str(job_values.get('job_apply_is_direct')).lower() if job_values.get('job_apply_is_direct') is not None else 'NULL'} AS job_apply_is_direct,
-                        {float(job_values['job_apply_quality_score']) if job_values['job_apply_quality_score'] is not None else 'NULL'} AS job_apply_quality_score,
+                        '{job_values.get('job_apply_link', '')}' AS job_apply_link,
+                        {job_values.get('job_apply_is_direct', 'NULL')} AS job_apply_is_direct,
                         {job_values.get('job_apply_quality_score', 'NULL')} AS job_apply_quality_score,
-                        {str(job_values.get('job_is_remote')).lower() if job_values.get('job_is_remote') is not None else 'NULL'} AS job_is_remote,
-                        {int(job_values.get('job_posted_at_timestamp')) if job_values.get('job_posted_at_timestamp') else 'NULL'} AS job_posted_at_timestamp,
-                        {f"TO_TIMESTAMP('{job_values['job_posted_at_datetime_utc']}', 'YYYY-MM-DD HH24:MI:SS.FF')" if job_values.get('job_posted_at_datetime_utc') else 'NULL'} AS job_posted_at_datetime_utc,
+                        '{job_values.get('job_description', '')}' AS job_description,
+                        {job_values.get('job_is_remote', 'NULL')} AS job_is_remote,
+                        {job_values.get('job_posted_at_timestamp', 'NULL')} AS job_posted_at_timestamp,
                         {job_values.get('job_posted_at_datetime_utc', 'NULL')} AS job_posted_at_datetime_utc,
                         '{UPDATED_AT}' AS updated_at
                 ) AS source
@@ -700,7 +689,7 @@ def load_to_snowflake(**context):
                     SELECT 
                         '{option_values.get('job_id')}' AS job_id, 
                         '{option_values.get('publisher', '')}' AS publisher, 
-                        CASE WHEN {option_values.get('is_direct', 'NULL')} IS NULL THEN NULL ELSE {option_values.get('is_direct', 'NULL')}::BOOLEAN END AS is_direct
+                        '{option_values.get('apply_link', '')}' AS apply_link, 
                         {option_values.get('is_direct', 'NULL')} AS is_direct
                 ) AS source
                 ON target.job_id = source.job_id AND target.publisher = source.publisher
