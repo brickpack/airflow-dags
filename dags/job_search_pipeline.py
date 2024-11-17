@@ -693,7 +693,7 @@ default_args = {
 }
 
 with DAG(
-    "import_job_search",
+    "job_search_pipeline",
     default_args=default_args,
     description="Fetch job data from RapidAPI, process it, and load into Snowflake and PostgreSQL.",
     schedule_interval=timedelta(hours=6),
