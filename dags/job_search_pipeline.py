@@ -6,6 +6,7 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.operators.python import PythonOperator
 import snowflake.connector
 from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 import requests
 import logging
@@ -22,6 +23,7 @@ API_URL = "https://jsearch.p.rapidapi.com/search"
 API_HOST = "jsearch.p.rapidapi.com"
 BUCKET = 'birkbeck-job-search'
 AIRFLOW_PG_CONN = 'pg_jobs'
+UPDATED_AT = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
 
 # Query parameters
 QUERY_PARAMS = {
@@ -270,7 +272,7 @@ def transform_data(**context):
                 job_offer_expiration_datetime_str, '%Y-%m-%dT%H:%M:%S.%fZ')
         else:
             transformed_data['job_offer_expiration_datetime_utc'] = None
-            
+
         transformed_data['job_offer_expiration_timestamp'] = parse_int(job.get('job_offer_expiration_timestamp'))
 
         # Flatten 'job_required_experience'
@@ -637,7 +639,7 @@ def load_to_snowflake(**context):
                         {job_values.get('job_is_remote', 'NULL')} AS job_is_remote,
                         {job_values.get('job_posted_at_timestamp', 'NULL')} AS job_posted_at_timestamp,
                         {job_values.get('job_posted_at_datetime_utc', 'NULL')} AS job_posted_at_datetime_utc,
-                        '{datetime.now(datetime.timezone.utc)}' AS updated_at
+                        {UPDATED_AT} AS updated_at
                 ) AS source
                 ON target.job_id = source.job_id
                 WHEN MATCHED THEN
