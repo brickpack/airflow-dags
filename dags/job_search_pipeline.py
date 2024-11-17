@@ -1,180 +1,132 @@
 from airflow import DAG
 from airflow.hooks.base import BaseHook
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-from airflow.operators.python_operator import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.operators.python import PythonOperator
 import snowflake.connector
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 import requests
 import logging
 import json
 import os
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# API
-airflow_api_conn = 'rapidapi_jsearch'
-api_url = "https://jsearch.p.rapidapi.com/search"
-api_host = "jsearch.p.rapidapi.com"
-# querystring Params
-query = "database engineer in united states"
-page = "1"
-num_pages = "10"
-date_posted = "month"
-remote_jobs_only = "true"
-employment_types = "FULLTIME"
+# Constants
+AIRFLOW_API_CONN = 'rapidapi_jsearch'
+API_URL = "https://jsearch.p.rapidapi.com/search"
+API_HOST = "jsearch.p.rapidapi.com"
+BUCKET_NAME = 'birkbeck-job-search'
+AIRFLOW_PG_CONN = 'pg_jobs'
 
-# S3
-bucket = 'birkbeck-job-search'
-
-# DB
-airflow_pg_conn = 'pg_jobs'
-
+# Query parameters
+QUERY_PARAMS = {
+    "query": "database engineer in united states",
+    "page": "1",
+    "num_pages": "10",
+    "date_posted": "month",
+    "remote_jobs_only": "true",
+    "employment_types": "FULLTIME",
+}
 
 def get_rapidapi_key():
-    """Fetch the RapidAPI key from the Airflow connection."""
+    """Fetch the RapidAPI key from Airflow connections."""
     try:
-        connection = BaseHook.get_connection(airflow_api_conn)
-        return connection.extra_dejson.get('headers').get('x-rapidapi-key')
+        connection = BaseHook.get_connection(AIRFLOW_API_CONN)
+        return connection.extra_dejson.get('headers', {}).get('x-rapidapi-key')
     except Exception as e:
-        logger.error("Failed to get RapidAPI key: %s", e)
+        logger.error("Failed to retrieve RapidAPI key: %s", e)
         raise
 
 def get_snowflake_conn():
+    """Retrieve Snowflake connection details and establish a connection."""
     try:
-        # Retrieve connection from Airflow
         conn = BaseHook.get_connection('snowflake_conn')
-        logger.info("Retrieved Snowflake connection details.")
-
-        # Extract extras
         extras = conn.extra_dejson
         account = extras.get("account")
         region = extras.get("region")
         full_account = f"{account}.{region}" if region else account
 
-        # Connect to Snowflake
         return snowflake.connector.connect(
             user=conn.login,
             password=conn.password,
             account=full_account,
             warehouse=extras.get("warehouse"),
             database=extras.get("database"),
-            schema=extras.get("schema", "PUBLIC"),  # Default to PUBLIC schema if not set
+            schema=extras.get("schema", "PUBLIC"),
             role=extras.get("role"),
-            insecure_mode=extras.get("insecure_mode", False)  # Default to False
         )
-    except snowflake.connector.Error as snow_err:
-        logger.error(f"Snowflake connection error: {snow_err}")
+    except snowflake.connector.Error as err:
+        logger.error("Snowflake connection error: %s", err)
         raise
     except Exception as e:
-        logger.error(f"Unexpected error occurred: {e}")
+        logger.error("Unexpected error during Snowflake connection: %s", e)
         raise
 
-def upload_to_s3(file_name, bucket, object_name=None):
-    """Upload a file to an S3 bucket using Airflow's S3Hook with partitioning by date."""
-    s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
+def upload_to_s3(file_path, bucket, object_name):
+    """Upload a file to S3 with a partitioned path based on the current date."""
     try:
-        # Create a partitioned path based on the current date
-        date_partition = datetime.now().strftime('%Y/%m/%d')
-        partitioned_object_name = f"{date_partition}/{object_name or file_name}"
-        
-        s3_hook.load_file(filename=file_name, key=partitioned_object_name, bucket_name=bucket, replace=True)
-        print(f"File {file_name} uploaded to s3://{bucket}/{partitioned_object_name}")
+        s3_hook = S3Hook(aws_conn_id='aws_default')
+        partitioned_path = f"{datetime.now().strftime('%Y/%m/%d')}/{object_name}"
+        s3_hook.load_file(filename=file_path, bucket_name=bucket, key=partitioned_path, replace=True)
+        logger.info("File %s uploaded to s3://%s/%s", file_path, bucket, partitioned_path)
     except Exception as e:
-        print(f"Failed to upload {file_name} to S3: {e}")
+        logger.error("Failed to upload %s to S3: %s", file_path, e)
+        raise
+
+def download_from_s3(bucket, object_name):
+    """Download a file from S3 to a temporary directory."""
+    try:
+        s3_hook = S3Hook(aws_conn_id='aws_default')
+        local_dir = "/opt/airflow/tmp"
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, os.path.basename(object_name))
+        s3_hook.download_file(bucket_name=bucket, key=object_name, local_path=local_path)
+        logger.info("File downloaded from s3://%s/%s to %s", bucket, object_name, local_path)
+        return local_path
+    except Exception as e:
+        logger.error("Failed to download %s from S3: %s", object_name, e)
         raise
 
 def call_job_search_api():
-    """Fetch job search results from the RapidAPI, store it locally and upload to S3."""
+    """Fetch job data from the RapidAPI and save it to S3."""
     try:
-        url = api_url
         headers = {
             "x-rapidapi-key": get_rapidapi_key(),
-            "x-rapidapi-host": api_host
+            "x-rapidapi-host": API_HOST,
         }
-        querystring = {
-            "query": query,
-            "page": page,
-            "num_pages": num_pages,
-            "date_posted": date_posted,
-            "remote_jobs_only": remote_jobs_only,
-            "employment_types": employment_types,
-        }
-        response = requests.get(url, headers=headers, params=querystring)
+        response = requests.get(API_URL, headers=headers, params=QUERY_PARAMS)
         response.raise_for_status()
 
-        # Save the response to a local file
         local_file_path = "/tmp/job_search_response.json"
         with open(local_file_path, "w") as file:
             json.dump(response.json(), file, indent=4)
 
-        # Upload the JSON file to S3
-        s3_file_key = "job_search/job_search_response.json"
-        upload_to_s3(local_file_path, bucket, s3_file_key)
-
-        print(f"Response has been uploaded to s3://{bucket}/{s3_file_key}")
+        upload_to_s3(local_file_path, BUCKET_NAME, "job_search_response.json")
     except requests.exceptions.RequestException as e:
-        logger.error("HTTP Request failed: %s", e)
-        raise
-
-def download_from_s3(bucket, object_name):
-    """Download a file from an S3 bucket using Airflow's S3Hook and manually write it to a file."""
-    s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
-
-    # Manually define the file path
-    tmp_dir = "/opt/airflow/tmp"
-    file_name = "job_search_response.json"
-    local_file_path = os.path.join(tmp_dir, file_name)
-
-    # Ensure the directory exists
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir, exist_ok=True)  # Create the directory if it doesn't exist
-        print(f"Directory {tmp_dir} created.")
-
-    try:
-        # Fetch the S3 object as bytes
-        s3_object = s3_hook.get_key(key=object_name, bucket_name=bucket)
-        file_data = s3_object.get()['Body'].read()  # Read the S3 object content as bytes
-        
-        # Write the S3 object data to a local file
-        with open(local_file_path, "wb") as f:
-            f.write(file_data)
-            print(f"File downloaded from s3://{bucket}/{object_name} and written to {local_file_path}")
-        
-        return local_file_path  # Return the file path for further use
-
-    except Exception as e:
-        print(f"Failed to download {object_name} from S3: {e}")
+        logger.error("Failed to fetch job data: %s", e)
         raise
 
 def extract_data(**context):
-    import json
-    # Read JSON data from a file
-    date_partition = datetime.now().strftime('%Y/%m/%d')
-    s3_file_key = f"{date_partition}/job_search/job_search_response.json"
-    local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
-    print(f"File downloaded from s3://{bucket}/{s3_file_key} and written to variable local_file_path: {local_file_path}")
-
+    """Extract job data from S3 and push it to XCom."""
     try:
-        with open(local_file_path, 'r') as file:
+        date_partition = datetime.now().strftime('%Y/%m/%d')
+        object_name = f"{date_partition}/job_search_response.json"
+        local_path = download_from_s3(BUCKET_NAME, object_name)
+
+        with open(local_path, 'r') as file:
             data = json.load(file)
-        # Push data to XCom
         context['ti'].xcom_push(key='raw_data', value=data)
     except Exception as e:
-        # Log the error and re-raise
-        print(f"Error in extract_data: {e}")
-        raise e
+        logger.error("Error in extract_data: %s", e)
+        raise
 
 def transform_data(**context):
-    import json
-    import logging
-    from datetime import datetime
-    from urllib.parse import urlparse
-
-    logging.info("Pulling raw_data from XCom")
+    """Transform the raw data into a structured format for loading."""
     raw_data = context['ti'].xcom_pull(key='raw_data', task_ids='extract_data')
     if raw_data is None:
         logging.error("No data received from extract_data task")
@@ -378,77 +330,78 @@ def transform_data(**context):
     context['ti'].xcom_push(key='transformed_data_list', value=transformed_jobs)
     context['ti'].xcom_push(key='transformed_apply_options_list', value=transformed_apply_options_list)
 
-def load_data(**context):
-    import logging
 
+def load_to_postgres(**context):
+    """Load transformed data into PostgreSQL."""
     logging.info("Starting load_data task")
 
     transformed_data_list = context['ti'].xcom_pull(key='transformed_data_list', task_ids='transform_data')
     transformed_apply_options_list = context['ti'].xcom_pull(key='transformed_apply_options_list', task_ids='transform_data')
 
     try:
-        pg_hook = PostgresHook(postgres_conn_id=airflow_pg_conn)
+
+        pg_hook = PostgresHook(postgres_conn_id=AIRFLOW_PG_CONN)
         conn = pg_hook.get_conn()
         cursor = conn.cursor()
 
         # Create job_search table if it doesn't exist
         create_job_search_table_sql = """
-        CREATE TABLE IF NOT EXISTS job_search (
-            id SERIAL,
-            job_id VARCHAR(255) PRIMARY KEY,
-            employer_name VARCHAR(255),
-            employer_logo TEXT,
-            employer_website VARCHAR(255),
-            employer_company_type VARCHAR(100),
-            employer_linkedin VARCHAR(255),
-            job_publisher VARCHAR(100),
-            job_employment_type VARCHAR(50),
-            job_title VARCHAR(255),
-            job_apply_link TEXT,
-            job_apply_is_direct BOOLEAN,
-            job_apply_quality_score FLOAT,
-            job_description TEXT,
-            job_is_remote BOOLEAN,
-            job_posted_at_timestamp BIGINT,
-            job_posted_at_datetime_utc TIMESTAMP,
-            job_city VARCHAR(100),
-            job_state VARCHAR(100),
-            job_country VARCHAR(10),
-            job_latitude FLOAT,
-            job_longitude FLOAT,
-            job_benefits TEXT,
-            job_google_link TEXT,
-            job_offer_expiration_datetime_utc TIMESTAMP,
-            job_offer_expiration_timestamp BIGINT,
-            job_required_experience_no_experience_required BOOLEAN,
-            job_required_experience_required_in_months INT,
-            job_required_experience_experience_mentioned BOOLEAN,
-            job_required_experience_experience_preferred BOOLEAN,
-            job_required_skills TEXT,
-            job_required_education_postgraduate_degree BOOLEAN,
-            job_required_education_professional_certification BOOLEAN,
-            job_required_education_high_school BOOLEAN,
-            job_required_education_associates_degree BOOLEAN,
-            job_required_education_bachelors_degree BOOLEAN,
-            job_required_education_degree_mentioned BOOLEAN,
-            job_required_education_degree_preferred BOOLEAN,
-            job_required_education_professional_certification_mentioned BOOLEAN,
-            job_experience_in_place_of_education BOOLEAN,
-            job_min_salary DECIMAL(10,2),
-            job_max_salary DECIMAL(10,2),
-            job_salary_currency VARCHAR(10),
-            job_salary_period VARCHAR(50),
-            job_highlights TEXT,
-            job_job_title VARCHAR(255),
-            job_posting_language VARCHAR(10),
-            job_onet_soc VARCHAR(20),
-            job_onet_job_zone VARCHAR(20),
-            job_occupational_categories TEXT,
-            job_naics_code VARCHAR(20),
-            job_naics_name VARCHAR(255),
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
+            CREATE TABLE IF NOT EXISTS job_search (
+                id SERIAL,
+                job_id VARCHAR(255) PRIMARY KEY,
+                employer_name VARCHAR(255),
+                employer_logo TEXT,
+                employer_website VARCHAR(255),
+                employer_company_type VARCHAR(100),
+                employer_linkedin VARCHAR(255),
+                job_publisher VARCHAR(100),
+                job_employment_type VARCHAR(50),
+                job_title VARCHAR(255),
+                job_apply_link TEXT,
+                job_apply_is_direct BOOLEAN,
+                job_apply_quality_score FLOAT,
+                job_description TEXT,
+                job_is_remote BOOLEAN,
+                job_posted_at_timestamp BIGINT,
+                job_posted_at_datetime_utc TIMESTAMP,
+                job_city VARCHAR(100),
+                job_state VARCHAR(100),
+                job_country VARCHAR(10),
+                job_latitude FLOAT,
+                job_longitude FLOAT,
+                job_benefits TEXT,
+                job_google_link TEXT,
+                job_offer_expiration_datetime_utc TIMESTAMP,
+                job_offer_expiration_timestamp BIGINT,
+                job_required_experience_no_experience_required BOOLEAN,
+                job_required_experience_required_in_months INT,
+                job_required_experience_experience_mentioned BOOLEAN,
+                job_required_experience_experience_preferred BOOLEAN,
+                job_required_skills TEXT,
+                job_required_education_postgraduate_degree BOOLEAN,
+                job_required_education_professional_certification BOOLEAN,
+                job_required_education_high_school BOOLEAN,
+                job_required_education_associates_degree BOOLEAN,
+                job_required_education_bachelors_degree BOOLEAN,
+                job_required_education_degree_mentioned BOOLEAN,
+                job_required_education_degree_preferred BOOLEAN,
+                job_required_education_professional_certification_mentioned BOOLEAN,
+                job_experience_in_place_of_education BOOLEAN,
+                job_min_salary DECIMAL(10,2),
+                job_max_salary DECIMAL(10,2),
+                job_salary_currency VARCHAR(10),
+                job_salary_period VARCHAR(50),
+                job_highlights TEXT,
+                job_job_title VARCHAR(255),
+                job_posting_language VARCHAR(10),
+                job_onet_soc VARCHAR(20),
+                job_onet_job_zone VARCHAR(20),
+                job_occupational_categories TEXT,
+                job_naics_code VARCHAR(20),
+                job_naics_name VARCHAR(255),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """
         cursor.execute(create_job_search_table_sql)
 
         # Create apply_options table if it doesn't exist
@@ -538,12 +491,8 @@ def load_data(**context):
         cursor.close()
         conn.close()
 
-
-def load_to_snowflake(**kwargs):
-    """
-    Load transformed job data into Snowflake using MERGE for upserts.
-    """
-    context = kwargs['ti']
+def load_to_snowflake(**context):
+    """Load transformed job data into Snowflake."""
 
     # Retrieve transformed data from XCom
     transformed_data_list = context.xcom_pull(key='transformed_data_list', task_ids='transform_data')
@@ -554,9 +503,6 @@ def load_to_snowflake(**kwargs):
     try:
         conn = get_snowflake_conn()
         cursor = conn.cursor()
-
-        # Use the database
-        cursor.execute(f"USE DATABASE {conn.database};")
 
         # Ensure job_search table exists
         create_job_search_table_sql = """
@@ -739,53 +685,44 @@ def load_to_snowflake(**kwargs):
 
 
 default_args = {
-    'owner': 'airflow',
-    'start_date': datetime(2024, 9, 26),
-    'email': 'dave.birkbeck@gmail.com',
-    'email_on_failure': True,
-    'email_on_retry': False,
-    'retries': 1,
-    'retry_delay': timedelta(minutes=1),
+    "owner": "airflow",
+    "start_date": datetime(2024, 9, 26),
+    "retries": 1,
+    "retry_delay": timedelta(minutes=1),
+    "email_on_failure": True,
 }
 
-dag = DAG(
-    'import_job_search',
-    catchup=False,
+with DAG(
+    "import_job_search",
     default_args=default_args,
-    description='A DAG to call job search API, export JSON to S3, then import job_search_response.json from S3 into PostgreSQL',
-    schedule_interval=timedelta(hours=6)
-    # schedule_interval=timedelta(hours=1),
-)
+    description="Fetch job data from RapidAPI, process it, and load into Snowflake and PostgreSQL.",
+    schedule_interval=timedelta(hours=6),
+    catchup=False,
+) as dag:
 
-call_api = PythonOperator(
-    task_id='call_job_search_api_task',
-    python_callable=call_job_search_api,
-    dag=dag,
-)
+    call_api = PythonOperator(
+        task_id="call_job_search_api",
+        python_callable=call_job_search_api,
+    )
 
-extract = PythonOperator(
-    task_id='extract_data',
-    python_callable=extract_data,
-    provide_context=True
-)
+    extract = PythonOperator(
+        task_id="extract_data",
+        python_callable=extract_data,
+    )
 
-transform = PythonOperator(
-    task_id='transform_data',
-    python_callable=transform_data,
-    provide_context=True
-)
+    transform = PythonOperator(
+        task_id="transform_data",
+        python_callable=transform_data,
+    )
 
-load = PythonOperator(
-    task_id='load_data',
-    python_callable=load_data,
-    provide_context=True
-)
+    load_postgres = PythonOperator(
+        task_id="load_to_postgres",
+        python_callable=load_to_postgres,
+    )
 
-upload_to_snowflake = PythonOperator(
-    task_id='upload_to_snowflake',
-    python_callable=load_to_snowflake,
-    provide_context=True,
-    execution_timeout=timedelta(days=1)  # Ensure this task runs once a day
-)
+    load_snowflake = PythonOperator(
+        task_id="load_to_snowflake",
+        python_callable=load_to_snowflake,
+    )
 
-call_api >> extract >> transform >> load >> upload_to_snowflake
+    call_api >> extract >> transform >> [load_postgres, load_snowflake]
