@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 AIRFLOW_API_CONN = 'rapidapi_jsearch'
 API_URL = "https://jsearch.p.rapidapi.com/search"
 API_HOST = "jsearch.p.rapidapi.com"
-BUCKET_NAME = 'birkbeck-job-search'
+BUCKET = 'birkbeck-job-search'
 AIRFLOW_PG_CONN = 'pg_jobs'
 
 # Query parameters
@@ -67,14 +67,14 @@ def get_snowflake_conn():
         logger.error("Unexpected error during Snowflake connection: %s", e)
         raise
 
-def upload_to_s3(file_path, bucket, object_name):
+def upload_to_s3(file_path, BUCKET, object_name):
     """Upload a file to S3 with a partitioned path based on the current date."""
     try:
         s3_hook = S3Hook(aws_conn_id='aws_default')
         partitioned_path = f"{datetime.now().strftime('%Y/%m/%d')}/{object_name}"
-        logger.info("Uploading file to S3. Target path: s3://%s/%s", bucket, partitioned_path)
-        s3_hook.load_file(filename=file_path, bucket_name=bucket, key=partitioned_path, replace=True)
-        logger.info("File %s uploaded to s3://%s/%s", file_path, bucket, partitioned_path)
+        logger.info("Uploading file to S3. Target path: s3://%s/%s", BUCKET, partitioned_path)
+        s3_hook.load_file(filename=file_path, bucket_name=BUCKET, key=partitioned_path, replace=True)
+        logger.info("File %s uploaded to s3://%s/%s", file_path, BUCKET, partitioned_path)
     except Exception as e:
         logger.error("Failed to upload %s to S3: %s", file_path, e)
         raise
@@ -93,13 +93,13 @@ def call_job_search_api():
         with open(local_file_path, "w") as file:
             json.dump(response.json(), file, indent=4)
 
-        upload_to_s3(local_file_path, BUCKET_NAME, "job_search_response.json")
+        upload_to_s3(local_file_path, BUCKET, "job_search_response.json")
     except requests.exceptions.RequestException as e:
         logger.error("Failed to fetch job data: %s", e)
         raise
 
-def download_from_s3(bucket, object_name):
-    """Download a file from an S3 bucket using Airflow's S3Hook and manually write it to a file."""
+def download_from_s3(BUCKET, object_name):
+    """Download a file from an S3 BUCKET using Airflow's S3Hook and manually write it to a file."""
     s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
 
     # Manually define the file path
@@ -114,13 +114,13 @@ def download_from_s3(bucket, object_name):
 
     try:
         # Fetch the S3 object as bytes
-        s3_object = s3_hook.get_key(key=object_name, bucket_name=bucket)
+        s3_object = s3_hook.get_key(key=object_name, BUCKET_name=BUCKET)
         file_data = s3_object.get()['Body'].read()  # Read the S3 object content as bytes
         
         # Write the S3 object data to a local file
         with open(local_file_path, "wb") as f:
             f.write(file_data)
-            print(f"File downloaded from s3://{bucket}/{object_name} and written to {local_file_path}")
+            print(f"File downloaded from s3://{BUCKET}/{object_name} and written to {local_file_path}")
         
         return local_file_path  # Return the file path for further use
 
@@ -133,8 +133,8 @@ def extract_data(**context):
     # Read JSON data from a file
     date_partition = datetime.now().strftime('%Y/%m/%d')
     s3_file_key = f"{date_partition}/job_search/job_search_response.json"
-    local_file_path = download_from_s3(bucket, s3_file_key)  # Now this uses the manually defined path
-    print(f"File downloaded from s3://{bucket}/{s3_file_key} and written to variable local_file_path: {local_file_path}")
+    local_file_path = download_from_s3(BUCKET, s3_file_key)  # Now this uses the manually defined path
+    print(f"File downloaded from s3://{BUCKET}/{s3_file_key} and written to variable local_file_path: {local_file_path}")
 
     try:
         with open(local_file_path, 'r') as file:
