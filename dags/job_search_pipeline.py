@@ -80,22 +80,29 @@ def upload_to_s3(file_path, BUCKET, object_name):
         raise
 
 def call_job_search_api():
-    """Fetch job data from the RapidAPI and save it to S3."""
+    """Fetch job search results from the RapidAPI, store it locally and upload to S3."""
     try:
+        url = API_URL
         headers = {
             "x-rapidapi-key": get_rapidapi_key(),
-            "x-rapidapi-host": API_HOST,
+            "x-rapidapi-host": API_HOST
         }
-        response = requests.get(API_URL, headers=headers, params=QUERY_PARAMS)
+        querystring = {QUERY_PARAMS} 
+        response = requests.get(url, headers=headers, params=querystring)
         response.raise_for_status()
 
+        # Save the response to a local file
         local_file_path = "/tmp/job_search_response.json"
         with open(local_file_path, "w") as file:
             json.dump(response.json(), file, indent=4)
 
-        upload_to_s3(local_file_path, BUCKET, "job_search_response.json")
+        # Upload the JSON file to S3
+        s3_file_key = "job_search/job_search_response.json"
+        upload_to_s3(local_file_path, BUCKET, s3_file_key)
+
+        print(f"Response has been uploaded to s3://{BUCKET}/{s3_file_key}")
     except requests.exceptions.RequestException as e:
-        logger.error("Failed to fetch job data: %s", e)
+        logger.error("HTTP Request failed: %s", e)
         raise
 
 def download_from_s3(BUCKET, object_name):
