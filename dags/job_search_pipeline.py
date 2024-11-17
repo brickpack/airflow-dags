@@ -87,8 +87,7 @@ def call_job_search_api():
             "x-rapidapi-key": get_rapidapi_key(),
             "x-rapidapi-host": API_HOST
         }
-        querystring = {QUERY_PARAMS} 
-        response = requests.get(url, headers=headers, params=querystring)
+        response = requests.get(url, headers=headers, params=QUERY_PARAMS)
         response.raise_for_status()
 
         # Save the response to a local file
