@@ -638,7 +638,7 @@ def load_to_snowflake(**context):
                         '{job_values.get('job_description', '')}' AS job_description,
                         {job_values.get('job_is_remote', 'NULL')} AS job_is_remote,
                         {job_values.get('job_posted_at_timestamp', 'NULL')} AS job_posted_at_timestamp,
-                        job_values['job_posted_at_datetime_utc'] = f"'{job_values.get('job_posted_at_datetime_utc', 'NULL')}'"
+                        job_values['job_posted_at_datetime_utc'] = f'{job_values.get('job_posted_at_datetime_utc', 'NULL')}'
                         '{UPDATED_AT}' AS updated_at
                 ) AS source
                 ON target.job_id = source.job_id
