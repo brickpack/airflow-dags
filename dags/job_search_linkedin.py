@@ -143,9 +143,13 @@ def extract_data(**context):
 
 def transform_data(**kwargs):
     ti = kwargs['ti']
-    data = ti.xcom_pull(task_ids='extract_data')
+    data = ti.xcom_pull(task_ids='extract_data', key='raw_data')
+    if not data:
+        logging.error("No data found to transform")
+        return []
+
     transformed_data = []
-    for item in data:
+    for item in data.get('data', []):
         transformed_data.append({
             'id': item.get('id', 'N/A'),
             'title': item.get('title', 'N/A'),
@@ -156,17 +160,20 @@ def transform_data(**kwargs):
             'posted_timestamp': item.get('postedTimestamp', 'N/A'),
             'benefits': item.get('benefits', 'N/A')
         })
-    return transformed_data
-
+    ti.xcom_push(key='transformed_data', value=transformed_data)
 
 def load_data(**kwargs):
     ti = kwargs["ti"]
-    transformed_data = ti.xcom_pull(task_ids="transform_data")
+    transformed_data = ti.xcom_pull(task_ids="transform_data", key='transformed_data')
+    if not transformed_data:
+        logging.error("No transformed data found to load")
+        return
+
     pg_hook = PostgresHook(postgres_conn_id=airflow_pg_conn)
     conn = pg_hook.get_conn()
 
     cursor = conn.cursor()
-
+    
     # Create linkedin_jobs table if it doesn't exist
     create_linkedin_table_sql = """
     CREATE TABLE IF NOT EXISTS linkedin_jobs (
