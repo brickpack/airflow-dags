@@ -166,6 +166,12 @@ def transform_data(**kwargs):
 
     transformed_data = []
     for item in data.get("data", []):
+        post_at = item.get("postAt", "N/A").replace(" +0000 UTC", "")
+        try:
+            post_at = datetime.strptime(post_at, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            post_at = None
+
         transformed_data.append(
             {
                 "id": item.get("id", "N/A"),
@@ -173,9 +179,7 @@ def transform_data(**kwargs):
                 "url": item.get("url", "N/A"),
                 "company_name": item["company"].get("name", "N/A"),
                 "location": item.get("location", "N/A"),
-                "post_at": item.get("postAt", "N/A").replace(
-                    " +0000 UTC", ""
-                ),  # Convert to acceptable format
+                "post_at": post_at,
                 "posted_timestamp": item.get("postedTimestamp", "N/A"),
                 "benefits": item.get("benefits", "N/A"),
             }
@@ -261,19 +265,24 @@ with DAG(
     call_api = PythonOperator(
         task_id="call_job_search_api_task",
         python_callable=call_job_search_api,
-        dag=dag,
     )
 
     extract_data_task = PythonOperator(
-        task_id="extract_data", python_callable=extract_data, provide_context=True
+        task_id="extract_data",
+        python_callable=extract_data,
+        provide_context=True,
     )
 
     transform_data_task = PythonOperator(
-        task_id="transform_data", python_callable=transform_data, provide_context=True
+        task_id="transform_data",
+        python_callable=transform_data,
+        provide_context=True,
     )
 
     load_data_task = PythonOperator(
-        task_id="load_data", python_callable=load_data, provide_context=True
+        task_id="load_data",
+        python_callable=load_data,
+        provide_context=True,
     )
 
 call_api >> extract_data_task >> transform_data_task >> load_data_task
