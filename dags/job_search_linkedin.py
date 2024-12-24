@@ -173,7 +173,7 @@ def load_data(**kwargs):
     conn = pg_hook.get_conn()
 
     cursor = conn.cursor()
-    
+
     # Create linkedin_jobs table if it doesn't exist
     create_linkedin_table_sql = """
     CREATE TABLE IF NOT EXISTS linkedin_jobs (
@@ -210,7 +210,7 @@ def load_data(**kwargs):
                 item["company_name"],
                 item["location"],
                 item["post_at"],
-                item["post_timestamp"],
+                item["posted_timestamp"],
                 item["benefits"],
             ),
         )
