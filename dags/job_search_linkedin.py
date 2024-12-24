@@ -166,11 +166,11 @@ def transform_data(**kwargs):
 
     transformed_data = []
     for item in data.get("data", []):
-        post_at = item.get("postAt", "N/A").replace(" +0000 UTC", "")
-        try:
-            post_at = datetime.strptime(post_at, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            post_at = None
+        # post_at = item.get("postAt", "N/A").replace(" +0000 UTC", "")
+        # try:
+        #     post_at = datetime.strptime(post_at, "%Y-%m-%d %H:%M:%S")
+        # except ValueError:
+        #     post_at = None
 
         transformed_data.append(
             {
@@ -179,7 +179,7 @@ def transform_data(**kwargs):
                 "url": item.get("url", "N/A"),
                 "company_name": item["company"].get("name", "N/A"),
                 "location": item.get("location", "N/A"),
-                "post_at": post_at.strftime("%Y-%m-%d %H:%M:%S") if post_at else None,
+                "post_at": item.get("postAt", "N/A"),
                 "posted_timestamp": item.get("postedTimestamp", "N/A"),
                 "benefits": item.get("benefits", "N/A"),
             }
@@ -207,7 +207,7 @@ def load_data(**kwargs):
         url VARCHAR(255),
         company_name VARCHAR(255),
         location VARCHAR(255),
-        post_at TIMESTAMP,
+        post_at DATE,
         posted_timestamp BIGINT,
         benefits TEXT
     );
@@ -248,7 +248,7 @@ default_args = {
     "owner": "airflow",
     "start_date": datetime(2024, 12, 24),
     "email": "dave.birkbeck@gmail.com",
-    "email_on_failure": True,
+    "email_on_failure": False,
     "email_on_retry": False,
     "retries": 1,
     "retry_delay": timedelta(minutes=1),
