@@ -100,7 +100,7 @@ def call_job_search_api():
             "page": page,
             "num_pages": num_pages,
             "date_posted": date_posted,
-            "remote_jobs_only": work_from_home,
+            "work_from_home": work_from_home,
             "employment_types": employment_types,
         }
         response = requests.get(url, headers=headers, params=querystring)
