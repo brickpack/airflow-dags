@@ -166,11 +166,11 @@ def transform_data(**kwargs):
 
     transformed_data = []
     for item in data.get("data", []):
-        # post_at = item.get("postAt", "N/A").replace(" +0000 UTC", "")
-        # try:
-        #     post_at = datetime.strptime(post_at, "%Y-%m-%d %H:%M:%S")
-        # except ValueError:
-        #     post_at = None
+        post_at = item.get("postAt", "N/A").replace(" +0000 UTC", "")
+        try:
+            post_at = datetime.strptime(post_at, "%Y-%m-%d %H:%M:%S").date()
+        except ValueError:
+            post_at = None
 
         transformed_data.append(
             {
@@ -179,7 +179,7 @@ def transform_data(**kwargs):
                 "url": item.get("url", "N/A"),
                 "company_name": item["company"].get("name", "N/A"),
                 "location": item.get("location", "N/A"),
-                "post_at": item.get("postAt", "N/A"),
+                "post_at": post_at,
                 "posted_timestamp": item.get("postedTimestamp", "N/A"),
                 "benefits": item.get("benefits", "N/A"),
             }
