@@ -24,7 +24,7 @@ query = "database engineer in united states"
 page = "1"
 num_pages = "10"
 date_posted = "month"
-remote_jobs_only = "true"
+work_from_home = "true"
 employment_types = "FULLTIME"
 
 # S3
