@@ -166,26 +166,27 @@ def transform_data(**kwargs):
 
     transformed_data = []
     for item in data.get("data", []):
-        post_at = item.get("postAt", "N/A").replace(" +0000 UTC", "")
+        post_at = item.get("postAt", "N/A")
         try:
-            post_at = datetime.strptime(post_at, "%Y-%m-%d %H:%M:%S").date()
+            # Strip the UTC suffix and parse
+            post_at = post_at.replace(" +0000 UTC", "")
+            post_at = datetime.strptime(post_at, "%Y-%m-%d %H:%M:%S")
+            # Format as ISO timestamp
+            post_at = post_at.strftime("%Y-%m-%d %H:%M:%S")
         except ValueError:
             post_at = None
 
-        transformed_data.append(
-            {
-                "id": item.get("id", "N/A"),
-                "title": item.get("title", "N/A"),
-                "url": item.get("url", "N/A"),
-                "company_name": item["company"].get("name", "N/A"),
-                "location": item.get("location", "N/A"),
-                "post_at": post_at,
-                "posted_timestamp": item.get("postedTimestamp", "N/A"),
-                "benefits": item.get("benefits", "N/A"),
-            }
-        )
+        transformed_data.append({
+            "id": item.get("id", "N/A"),
+            "title": item.get("title", "N/A"),
+            "url": item.get("url", "N/A"),
+            "company_name": item["company"].get("name", "N/A"),
+            "location": item.get("location", "N/A"),
+            "post_at": post_at,
+            "posted_timestamp": item.get("postedTimestamp", "N/A"),
+            "benefits": item.get("benefits", "N/A"),
+        })
     ti.xcom_push(key="transformed_data", value=transformed_data)
-
 
 def load_data(**kwargs):
     ti = kwargs["ti"]
@@ -196,10 +197,9 @@ def load_data(**kwargs):
 
     pg_hook = PostgresHook(postgres_conn_id=airflow_pg_conn)
     conn = pg_hook.get_conn()
-
     cursor = conn.cursor()
 
-    # Create linkedin_jobs table if it doesn't exist
+    # Update schema to use TIMESTAMP
     create_linkedin_table_sql = """
     CREATE TABLE IF NOT EXISTS linkedin_jobs (
         id VARCHAR(255) PRIMARY KEY,
@@ -207,12 +207,13 @@ def load_data(**kwargs):
         url VARCHAR(255),
         company_name VARCHAR(255),
         location VARCHAR(255),
-        post_at DATE,
+        post_at TIMESTAMP,
         posted_timestamp BIGINT,
         benefits TEXT
     );
     """
     cursor.execute(create_linkedin_table_sql)
+    
 
     for item in transformed_data:
         cursor.execute(
