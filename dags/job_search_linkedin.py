@@ -236,12 +236,6 @@ with DAG(
         dag=dag,
     )
 
-    extract = PythonOperator(
-        task_id='extract_data',
-        python_callable=extract_data,
-        provide_context=True
-    )
-
     extract_data_task = PythonOperator(
         task_id='extract_data',
         python_callable=extract_data,
