@@ -179,7 +179,7 @@ def transform_data(**kwargs):
                 "url": item.get("url", "N/A"),
                 "company_name": item["company"].get("name", "N/A"),
                 "location": item.get("location", "N/A"),
-                "post_at": post_at,
+                "post_at": post_at.strftime("%Y-%m-%d %H:%M:%S") if post_at else None,
                 "posted_timestamp": item.get("postedTimestamp", "N/A"),
                 "benefits": item.get("benefits", "N/A"),
             }
