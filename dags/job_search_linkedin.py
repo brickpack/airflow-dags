@@ -156,37 +156,41 @@ def extract_data(**context):
         print(f"Error in extract_data: {e}")
         raise e
 
-
-def transform_data(**kwargs):
-    ti = kwargs["ti"]
-    data = ti.xcom_pull(task_ids="extract_data", key="raw_data")
-    if not data:
-        logging.error("No data found to transform")
-        return []
+def transform_data(**context):
+    logging.info("Pulling raw_data from XCom")
+    raw_data = context['ti'].xcom_pull(key='raw_data', task_ids='extract_data')
+    if raw_data is None:
+        logging.error("No data received from extract_data task")
+        raise ValueError("No data received from extract_data task")
+    logging.info("raw_data successfully retrieved from XCom")
 
     transformed_data = []
-    for item in data.get("data", []):
-        post_at = item.get("postAt", "N/A")
-        try:
-            # Strip the UTC suffix and parse
-            post_at = post_at.replace(" +0000 UTC", "")
-            post_at = datetime.strptime(post_at, "%Y-%m-%d %H:%M:%S")
-            # Format as ISO timestamp
-            post_at = post_at.strftime("%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            post_at = None
 
-        transformed_data.append({
-            "id": item.get("id", "N/A"),
-            "title": item.get("title", "N/A"),
-            "url": item.get("url", "N/A"),
-            "company_name": item["company"].get("name", "N/A"),
-            "location": item.get("location", "N/A"),
-            "post_at": post_at,
-            "posted_timestamp": item.get("postedTimestamp", "N/A"),
-            "benefits": item.get("benefits", "N/A"),
+    # Process each job in the data
+    for job in raw_data.get('data', []):
+        transformed_job = {}
+
+        # Convert timestamps
+        postAt = job.get('postAt')
+        if postAt:
+            transformed_job['postAt'] = datetime.strptime(postAt, '%Y-%m-%dT%H:%M:%S.%fZ')
+        else:
+            transformed_job['postAt'] = None
+
+        transformed_job.update({
+            "id": job.get("id", "N/A"),
+            "title": job.get("title", "N/A"),
+            "url": job.get("url", "N/A"),
+            "company_name": job["company"].get("name", "N/A"),
+            "location": job.get("location", "N/A"),
+            "post_at": transformed_job['postAt'],
+            "posted_timestamp": job.get("postedTimestamp", "N/A"),
+            "benefits": job.get("benefits", "N/A"),
         })
-    ti.xcom_push(key="transformed_data", value=transformed_data)
+
+        transformed_data.append(transformed_job)
+
+    context['ti'].xcom_push(key="transformed_data", value=transformed_data)
 
 def load_data(**kwargs):
     ti = kwargs["ti"]
