@@ -29,6 +29,7 @@ employment_types = "FULLTIME"
 
 # S3
 bucket = 'birkbeck-job-search'
+aws_conn_id = "aws_s3"
 
 # DB
 airflow_pg_conn = 'pg_jobs'
@@ -75,7 +76,7 @@ def get_snowflake_conn():
 
 def upload_to_s3(file_name, bucket, object_name=None):
     """Upload a file to an S3 bucket using Airflow's S3Hook with partitioning by date."""
-    s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
+    s3_hook = S3Hook(aws_conn_id=aws_conn_id)  # Use the connection stored in Airflow
     try:
         # Create a partitioned path based on the current date
         date_partition = datetime.now().strftime('%Y/%m/%d')
@@ -122,7 +123,7 @@ def call_job_search_api():
 
 def download_from_s3(bucket, object_name):
     """Download a file from an S3 bucket using Airflow's S3Hook and manually write it to a file."""
-    s3_hook = S3Hook(aws_conn_id='aws_default')  # Use the connection stored in Airflow
+    s3_hook = S3Hook(aws_conn_id=aws_conn_id)  # Use the connection stored in Airflow
 
     # Manually define the file path
     tmp_dir = "/opt/airflow/tmp"

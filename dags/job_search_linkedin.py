@@ -26,7 +26,7 @@ datePosted = "past24Hours"
 jobType = "fullTime"
 onsiteRemote = "remote"
 sort = "mostRecent"
-aws_conn_id = "aws_default"
+aws_conn_id = "aws_s3"
 
 # S3
 bucket = "birkbeck-job-search"
