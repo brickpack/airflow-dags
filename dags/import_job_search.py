@@ -789,4 +789,4 @@ upload_to_snowflake = PythonOperator(
     execution_timeout=timedelta(days=1)  # Ensure this task runs once a day
 )
 
-call_api >> extract >> transform >> load >> upload_to_snowflake
+call_api >> extract >> transform >> load # >> upload_to_snowflake
