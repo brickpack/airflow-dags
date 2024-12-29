@@ -100,7 +100,7 @@ def call_job_search_api():
 
 def download_from_s3(bucket, object_name):
     """Download a file from an S3 bucket using Airflow's S3Hook and manually write it to a file."""
-    s3_hook = S3Hook(aws_conn_id="aws_default")  # Use the connection stored in Airflow
+    s3_hook = S3Hook(aws_conn_id=aws_conn_id)  # Use the connection stored in Airflow
 
     # Manually define the file path
     tmp_dir = "/opt/airflow/tmp"
